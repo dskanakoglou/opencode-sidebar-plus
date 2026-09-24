@@ -1,5 +1,5 @@
 {
-  "name": "opencode-lab-sidebar",
+  "name": "opencode-sidebar-plus",
   "version": "0.1.0",
   "description": "OpenCode v2 sidebar: context gauge, agent to-do list, live activity, shells, files, sub-agents and alerts, each switchable",
   "type": "module",
@@ -7,11 +7,11 @@
   "author": "Dimitrios S. Kanakoglou",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/dskanakoglou/opencode-lab-sidebar.git"
+    "url": "git+https://github.com/dskanakoglou/opencode-sidebar-plus.git"
   },
-  "homepage": "https://github.com/dskanakoglou/opencode-lab-sidebar#readme",
+  "homepage": "https://github.com/dskanakoglou/opencode-sidebar-plus#readme",
   "bugs": {
-    "url": "https://github.com/dskanakoglou/opencode-lab-sidebar/issues"
+    "url": "https://github.com/dskanakoglou/opencode-sidebar-plus/issues"
   },
   "exports": {
     "./server": "./server.ts",

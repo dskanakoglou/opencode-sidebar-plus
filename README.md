@@ -1,4 +1,4 @@
-# opencode-lab-sidebar
+# opencode-sidebar-plus
 
 A sidebar for the [OpenCode](https://opencode.ai) **v2** terminal UI. It shows how full the context window is, the agent's to-do list, what it is doing right now, and anything that needs attention, without scrolling the transcript. Every section and every part of a section can be switched on or off.
 
@@ -77,7 +77,7 @@ The plugin has two halves:
 
 ```json
 {
-  "plugins": ["/absolute/path/to/opencode-lab-sidebar"]
+  "plugins": ["/absolute/path/to/opencode-sidebar-plus"]
 }
 ```
 
@@ -94,7 +94,7 @@ Then, in `~/.config/opencode/cli.json`, hide the built-in one-line Context widge
 
 ```json
 {
-  "plugins": ["-opencode.sidebar.context", "/absolute/path/to/opencode-lab-sidebar"]
+  "plugins": ["-opencode.sidebar.context", "/absolute/path/to/opencode-sidebar-plus"]
 }
 ```
 
@@ -105,7 +105,7 @@ Then, in `~/.config/opencode/cli.json`, hide the built-in one-line Context widge
   "plugins": [
     "-opencode.sidebar.context",
     {
-      "package": "/absolute/path/to/opencode-lab-sidebar",
+      "package": "/absolute/path/to/opencode-sidebar-plus",
       "options": {
         "compactionBuffer": 2048,
         "sections": ["todo", "context", "activity"],
@@ -142,7 +142,7 @@ You can also put or symlink the folder into `.opencode/plugins/` in a project, o
 
 - **The to-do tool costs context.** Its description and schema are sent with every request: about 170 tokens, measured with `opencode/big-pickle` as the difference between the same prompt with the tool on and off. That is small, but worth knowing on 16k-token windows; `{ "todo": false }` removes it. The tool is stateless: the agent sends its whole list on every call, and the sidebar shows the latest version from the session history. The list therefore survives restarts and needs no extra storage. The arguments follow the shape of v1's `todowrite` (`{ todos: [{ content, status }] }`), because models already know that shape. The sidebar also reads lists sent in slightly different forms, and lists sent from OpenCode's code mode (`execute`).
 - Context numbers use the same formula as the built-in widget: all token counts of the last assistant step, against the model's `limit.context`.
-- Everything stays inside OpenCode. The plugin reads data the TUI already has, sends nothing over the network, runs no programs, and writes only its UI state (collapsed sections and feature switches, under `~/.local/state/opencode/latest/tui/plugin.lab.sidebar.*.json`).
+- Everything stays inside OpenCode. The plugin reads data the TUI already has, sends nothing over the network, runs no programs, and writes only its UI state (collapsed sections and feature switches, under `~/.local/state/opencode/latest/tui/plugin.sidebar-plus.*.json`).
 
 ## Development
 

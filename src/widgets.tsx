@@ -27,7 +27,7 @@ import {
 
 type Context = Plugin.Context
 
-export const PANEL = "lab.sidebar.details"
+export const PANEL = "sidebar-plus.details"
 const WIDTH = 32
 const BAR = 20
 

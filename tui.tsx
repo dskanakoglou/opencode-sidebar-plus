@@ -28,7 +28,7 @@ const SECTION_VIEWS: Record<SectionID, (props: { shared: Shared; sessionID: stri
 }
 
 const plugin: Plugin.Definition = {
-  id: "lab.sidebar",
+  id: "sidebar-plus",
   setup(ctx) {
     const options = readOptions(ctx.options)
     const [sections, updateSections] = ctx.storage.store("sections", { initial: { collapsed: {} as Record<string, boolean> } })
@@ -123,7 +123,7 @@ const plugin: Plugin.Definition = {
             mode: "global",
             commands: [
               {
-                id: "lab.sidebar.details",
+                id: "sidebar-plus.details",
                 title: "Session details",
                 description: "Turns, context growth and every tool call for this session",
                 group: "Sidebar",
@@ -134,7 +134,7 @@ const plugin: Plugin.Definition = {
                 },
               },
               {
-                id: "lab.sidebar.features",
+                id: "sidebar-plus.features",
                 title: "Sidebar features",
                 description: "Turn sidebar sections, details and alerts on or off",
                 group: "Sidebar",

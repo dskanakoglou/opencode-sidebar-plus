@@ -7,7 +7,7 @@ import { normalizeTodos, TODO_STATUSES, TODO_TOOL, todoSummary } from "./src/der
 const ICON = { pending: "[ ]", in_progress: "[~]", completed: "[x]", cancelled: "[-]" } as const
 
 const plugin: Plugin.Plugin = {
-  id: "lab.sidebar",
+  id: "sidebar-plus",
   async setup(ctx) {
     if (ctx.options?.todo === false) return
     const registration = await ctx.tool.transform((editor) => {
