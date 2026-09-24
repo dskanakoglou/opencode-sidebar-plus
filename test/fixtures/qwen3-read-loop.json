@@ -1,0 +1,643 @@
+[
+ {
+  "id": "msg_0d3866689001MBaS9NBR1GcVJA",
+  "time": {
+   "created": 1790255195821,
+   "streamed": 1790255220905,
+   "completed": 1790255220965
+  },
+  "type": "assistant",
+  "agent": "build",
+  "model": {
+   "id": "qwen3:8b",
+   "providerID": "ollama",
+   "variant": "default"
+  },
+  "content": [
+   {
+    "type": "tool",
+    "id": "call_yfdpguxr",
+    "name": "read",
+    "state": {
+     "status": "completed",
+     "input": {
+      "path": "notes.txt",
+      "offset": 1,
+      "limit": 3
+     },
+     "content": [
+      {
+       "type": "text",
+       "text": "ok"
+      }
+     ]
+    },
+    "time": {
+     "created": 1790255220803,
+     "ran": 1790255220900,
+     "completed": 1790255220914
+    }
+   }
+  ],
+  "finish": "tool-calls",
+  "rawFinish": "tool_calls",
+  "cost": 0,
+  "tokens": {
+   "input": 4096,
+   "output": 179,
+   "reasoning": 0,
+   "cache": {
+    "read": 0,
+    "write": 0
+   }
+  }
+ },
+ {
+  "id": "msg_0d3860772001oU2m8USOyj7Ruh",
+  "time": {
+   "created": 1790255171480,
+   "streamed": 1790255195693,
+   "completed": 1790255195776
+  },
+  "type": "assistant",
+  "agent": "build",
+  "model": {
+   "id": "qwen3:8b",
+   "providerID": "ollama",
+   "variant": "default"
+  },
+  "content": [
+   {
+    "type": "tool",
+    "id": "call_4na5i6qy",
+    "name": "read",
+    "state": {
+     "status": "completed",
+     "input": {
+      "path": "notes.txt",
+      "limit": 3,
+      "offset": 1
+     },
+     "content": [
+      {
+       "type": "text",
+       "text": "ok"
+      }
+     ]
+    },
+    "time": {
+     "created": 1790255195593,
+     "ran": 1790255195689,
+     "completed": 1790255195701
+    }
+   }
+  ],
+  "finish": "tool-calls",
+  "rawFinish": "tool_calls",
+  "cost": 0,
+  "tokens": {
+   "input": 4096,
+   "output": 158,
+   "reasoning": 0,
+   "cache": {
+    "read": 0,
+    "write": 0
+   }
+  }
+ },
+ {
+  "id": "msg_0d385a938001Q7Vz2k8LvbfvLQ",
+  "time": {
+   "created": 1790255147358,
+   "streamed": 1790255171373,
+   "completed": 1790255171433
+  },
+  "type": "assistant",
+  "agent": "build",
+  "model": {
+   "id": "qwen3:8b",
+   "providerID": "ollama",
+   "variant": "default"
+  },
+  "content": [
+   {
+    "type": "tool",
+    "id": "call_ywnzlqtb",
+    "name": "read",
+    "state": {
+     "status": "completed",
+     "input": {
+      "path": "notes.txt",
+      "offset": 1,
+      "limit": 3
+     },
+     "content": [
+      {
+       "type": "text",
+       "text": "ok"
+      }
+     ]
+    },
+    "time": {
+     "created": 1790255171267,
+     "ran": 1790255171368,
+     "completed": 1790255171382
+    }
+   }
+  ],
+  "finish": "tool-calls",
+  "rawFinish": "tool_calls",
+  "cost": 0,
+  "tokens": {
+   "input": 4096,
+   "output": 147,
+   "reasoning": 0,
+   "cache": {
+    "read": 0,
+    "write": 0
+   }
+  }
+ },
+ {
+  "id": "msg_0d3854bd6001d0S1jPo8pB0bO9",
+  "time": {
+   "created": 1790255123452,
+   "streamed": 1790255147249,
+   "completed": 1790255147310
+  },
+  "type": "assistant",
+  "agent": "build",
+  "model": {
+   "id": "qwen3:8b",
+   "providerID": "ollama",
+   "variant": "default"
+  },
+  "content": [
+   {
+    "type": "tool",
+    "id": "call_qihqiwrq",
+    "name": "read",
+    "state": {
+     "status": "completed",
+     "input": {
+      "path": "notes.txt",
+      "offset": 1,
+      "limit": 3
+     },
+     "content": [
+      {
+       "type": "text",
+       "text": "ok"
+      }
+     ]
+    },
+    "time": {
+     "created": 1790255147145,
+     "ran": 1790255147243,
+     "completed": 1790255147259
+    }
+   }
+  ],
+  "finish": "tool-calls",
+  "rawFinish": "tool_calls",
+  "cost": 0,
+  "tokens": {
+   "input": 4096,
+   "output": 148,
+   "reasoning": 0,
+   "cache": {
+    "read": 0,
+    "write": 0
+   }
+  }
+ },
+ {
+  "id": "msg_0d384d28c001AA5reERB77R72s",
+  "time": {
+   "created": 1790255092403,
+   "streamed": 1790255123347,
+   "completed": 1790255123404
+  },
+  "type": "assistant",
+  "agent": "build",
+  "model": {
+   "id": "qwen3:8b",
+   "providerID": "ollama",
+   "variant": "default"
+  },
+  "content": [
+   {
+    "type": "tool",
+    "id": "call_v1nk0xag",
+    "name": "read",
+    "state": {
+     "status": "completed",
+     "input": {
+      "path": "notes.txt",
+      "limit": 3
+     },
+     "content": [
+      {
+       "type": "text",
+       "text": "ok"
+      }
+     ]
+    },
+    "time": {
+     "created": 1790255123245,
+     "ran": 1790255123342,
+     "completed": 1790255123356
+    }
+   }
+  ],
+  "finish": "tool-calls",
+  "rawFinish": "tool_calls",
+  "cost": 0,
+  "tokens": {
+   "input": 4096,
+   "output": 309,
+   "reasoning": 0,
+   "cache": {
+    "read": 0,
+    "write": 0
+   }
+  }
+ },
+ {
+  "id": "msg_0d383fd38001NmD3Fo2q01iIql",
+  "time": {
+   "created": 1790255037790,
+   "streamed": 1790255092288,
+   "completed": 1790255092353
+  },
+  "type": "assistant",
+  "agent": "build",
+  "model": {
+   "id": "qwen3:8b",
+   "providerID": "ollama",
+   "variant": "default"
+  },
+  "content": [
+   {
+    "type": "tool",
+    "id": "call_b08fau3e",
+    "name": "read",
+    "state": {
+     "status": "completed",
+     "input": {
+      "path": "notes.txt",
+      "limit": 3,
+      "offset": 1
+     },
+     "content": [
+      {
+       "type": "text",
+       "text": "ok"
+      }
+     ]
+    },
+    "time": {
+     "created": 1790255092180,
+     "ran": 1790255092283,
+     "completed": 1790255092299
+    }
+   }
+  ],
+  "finish": "tool-calls",
+  "rawFinish": "tool_calls",
+  "cost": 0,
+  "tokens": {
+   "input": 4096,
+   "output": 842,
+   "reasoning": 0,
+   "cache": {
+    "read": 0,
+    "write": 0
+   }
+  }
+ },
+ {
+  "id": "msg_0d38399db0017O98uBkEbH2hyL",
+  "time": {
+   "created": 1790255012357,
+   "streamed": 1790255037686,
+   "completed": 1790255037743
+  },
+  "type": "assistant",
+  "agent": "build",
+  "model": {
+   "id": "qwen3:8b",
+   "providerID": "ollama",
+   "variant": "default"
+  },
+  "content": [
+   {
+    "type": "tool",
+    "id": "call_lfcv9qvu",
+    "name": "read",
+    "state": {
+     "status": "completed",
+     "input": {
+      "path": "notes.txt",
+      "limit": 3,
+      "offset": 1
+     },
+     "content": [
+      {
+       "type": "text",
+       "text": "ok"
+      }
+     ]
+    },
+    "time": {
+     "created": 1790255037584,
+     "ran": 1790255037682,
+     "completed": 1790255037693
+    }
+   }
+  ],
+  "finish": "tool-calls",
+  "rawFinish": "tool_calls",
+  "cost": 0,
+  "tokens": {
+   "input": 4096,
+   "output": 182,
+   "reasoning": 0,
+   "cache": {
+    "read": 0,
+    "write": 0
+   }
+  }
+ },
+ {
+  "id": "msg_0d3832894001BROqt1KWjcYpz7",
+  "time": {
+   "created": 1790254983359,
+   "streamed": 1790255012248,
+   "completed": 1790255012305
+  },
+  "type": "assistant",
+  "agent": "build",
+  "model": {
+   "id": "qwen3:8b",
+   "providerID": "ollama",
+   "variant": "default"
+  },
+  "content": [
+   {
+    "type": "tool",
+    "id": "call_vflgs641",
+    "name": "read",
+    "state": {
+     "status": "completed",
+     "input": {
+      "limit": 3,
+      "path": "notes.txt",
+      "offset": 1
+     },
+     "content": [
+      {
+       "type": "text",
+       "text": "ok"
+      }
+     ]
+    },
+    "time": {
+     "created": 1790255012143,
+     "ran": 1790255012241,
+     "completed": 1790255012259
+    }
+   }
+  ],
+  "finish": "tool-calls",
+  "rawFinish": "tool_calls",
+  "cost": 0,
+  "tokens": {
+   "input": 4096,
+   "output": 253,
+   "reasoning": 0,
+   "cache": {
+    "read": 0,
+    "write": 0
+   }
+  }
+ },
+ {
+  "id": "msg_0d382b5a3001CnbbIn7BKU1u21",
+  "time": {
+   "created": 1790254953930,
+   "streamed": 1790254983242,
+   "completed": 1790254983308
+  },
+  "type": "assistant",
+  "agent": "build",
+  "model": {
+   "id": "qwen3:8b",
+   "providerID": "ollama",
+   "variant": "default"
+  },
+  "content": [
+   {
+    "type": "tool",
+    "id": "call_xx7bidz7",
+    "name": "read",
+    "state": {
+     "status": "completed",
+     "input": {
+      "path": "notes.txt",
+      "offset": 1,
+      "limit": 3
+     },
+     "content": [
+      {
+       "type": "text",
+       "text": "ok"
+      }
+     ]
+    },
+    "time": {
+     "created": 1790254983138,
+     "ran": 1790254983237,
+     "completed": 1790254983252
+    }
+   }
+  ],
+  "finish": "tool-calls",
+  "rawFinish": "tool_calls",
+  "cost": 0,
+  "tokens": {
+   "input": 4096,
+   "output": 263,
+   "reasoning": 0,
+   "cache": {
+    "read": 0,
+    "write": 0
+   }
+  }
+ },
+ {
+  "id": "msg_0d382545c001rJFllu1RmBVBfJ",
+  "time": {
+   "created": 1790254929028,
+   "streamed": 1790254953832,
+   "completed": 1790254953883
+  },
+  "type": "assistant",
+  "agent": "build",
+  "model": {
+   "id": "qwen3:8b",
+   "providerID": "ollama",
+   "variant": "default"
+  },
+  "content": [
+   {
+    "type": "tool",
+    "id": "call_u2sbmref",
+    "name": "read",
+    "state": {
+     "status": "completed",
+     "input": {
+      "path": "notes.txt",
+      "offset": 1,
+      "limit": 3
+     },
+     "content": [
+      {
+       "type": "text",
+       "text": "ok"
+      }
+     ]
+    },
+    "time": {
+     "created": 1790254953729,
+     "ran": 1790254953827,
+     "completed": 1790254953840
+    }
+   }
+  ],
+  "finish": "tool-calls",
+  "rawFinish": "tool_calls",
+  "cost": 0,
+  "tokens": {
+   "input": 4096,
+   "output": 167,
+   "reasoning": 0,
+   "cache": {
+    "read": 0,
+    "write": 0
+   }
+  }
+ },
+ {
+  "id": "msg_0d381f491001Yw0qIup9d53ecp",
+  "time": {
+   "created": 1790254904508,
+   "streamed": 1790254928914,
+   "completed": 1790254928979
+  },
+  "type": "assistant",
+  "agent": "build",
+  "model": {
+   "id": "qwen3:8b",
+   "providerID": "ollama",
+   "variant": "default"
+  },
+  "content": [
+   {
+    "type": "tool",
+    "id": "call_mt6tug7w",
+    "name": "read",
+    "state": {
+     "status": "completed",
+     "input": {
+      "path": "notes.txt"
+     },
+     "content": [
+      {
+       "type": "text",
+       "text": "ok"
+      }
+     ]
+    },
+    "time": {
+     "created": 1790254928810,
+     "ran": 1790254928908,
+     "completed": 1790254928930
+    }
+   }
+  ],
+  "finish": "tool-calls",
+  "rawFinish": "tool_calls",
+  "cost": 0,
+  "tokens": {
+   "input": 4096,
+   "output": 154,
+   "reasoning": 0,
+   "cache": {
+    "read": 0,
+    "write": 0
+   }
+  }
+ },
+ {
+  "id": "msg_0d38166a00014ZJaiw2Yf2L9lo",
+  "time": {
+   "created": 1790254868179,
+   "streamed": 1790254904310,
+   "completed": 1790254904450
+  },
+  "type": "assistant",
+  "agent": "build",
+  "model": {
+   "id": "qwen3:8b",
+   "providerID": "ollama",
+   "variant": "default"
+  },
+  "content": [
+   {
+    "type": "tool",
+    "id": "call_yaieal35",
+    "name": "write",
+    "state": {
+     "status": "completed",
+     "input": {
+      "path": "notes.txt",
+      "content": "alpha\nbeta\ngamma"
+     },
+     "content": [
+      {
+       "type": "text",
+       "text": "ok"
+      }
+     ]
+    },
+    "time": {
+     "created": 1790254904209,
+     "ran": 1790254904306,
+     "completed": 1790254904339
+    }
+   }
+  ],
+  "finish": "tool-calls",
+  "rawFinish": "tool_calls",
+  "cost": 0,
+  "tokens": {
+   "input": 4096,
+   "output": 407,
+   "reasoning": 0,
+   "cache": {
+    "read": 0,
+    "write": 0
+   }
+  }
+ },
+ {
+  "id": "msg_0d3816683001hFNWhUvhyKYb2M",
+  "time": {
+   "created": 1790254868122
+  },
+  "text": "create notes.txt and count its lines",
+  "files": [],
+  "type": "user"
+ }
+]

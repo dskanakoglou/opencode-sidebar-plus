@@ -1,0 +1,54 @@
+{
+  "name": "opencode-lab-sidebar",
+  "version": "0.1.0",
+  "description": "OpenCode v2 sidebar: context gauge, agent to-do list, live activity, shells, files, sub-agents and alerts, each switchable",
+  "type": "module",
+  "license": "MIT",
+  "author": "Dimitrios S. Kanakoglou",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dskanakoglou/opencode-lab-sidebar.git"
+  },
+  "homepage": "https://github.com/dskanakoglou/opencode-lab-sidebar#readme",
+  "bugs": {
+    "url": "https://github.com/dskanakoglou/opencode-lab-sidebar/issues"
+  },
+  "exports": {
+    "./server": "./server.ts",
+    "./tui": "./tui.tsx"
+  },
+  "files": [
+    "server.ts",
+    "tui.tsx",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "check": "tsc -p .",
+    "test": "node --test test/*.test.ts"
+  },
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "sidebar"
+  ],
+  "engines": {
+    "opencode": ">=2.0.16"
+  },
+  "peerDependencies": {
+    "@opencode/plugin": ">=2.0.16",
+    "@opentui/core": ">=0.5.10",
+    "@opentui/solid": ">=0.5.10",
+    "solid-js": ">=1.9.0"
+  },
+  "devDependencies": {
+    "@opencode/plugin": "^2.0.16",
+    "@opencode/theme": "^2.0.16",
+    "@opentui/core": "^0.5.12",
+    "@opentui/solid": "^0.5.12",
+    "@types/node": "^26.6.2",
+    "solid-js": "^1.9.12",
+    "typescript": "^5.9.3"
+  }
+}
