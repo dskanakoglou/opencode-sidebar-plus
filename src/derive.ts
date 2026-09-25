@@ -244,7 +244,7 @@ export function activity(messages: readonly Message[], options: Options): Activi
   const lastAssistant = assistants(messages).at(-1)
   return {
     current,
-    recent: calls.slice(-options.recentTools),
+    recent: options.recentTools > 0 ? calls.slice(-options.recentTools) : [],
     total: calls.length,
     failed: calls.filter((c) => c.status === "error").length,
     loop: detectLoop(calls, options.loopThreshold),
@@ -259,7 +259,9 @@ export function activity(messages: readonly Message[], options: Options): Activi
 export function detectLoop(calls: readonly ToolCall[], threshold: number): Activity["loop"] {
   const last = calls.at(-1)
   if (!last) return
-  const key = (c: ToolCall) => `${c.name}\u0000${c.label || JSON.stringify(c.input)}`
+  const key = (c: ToolCall) => c.nested.length
+    ? JSON.stringify(c.nested.map((n) => [n.tool, toolLabel(n.input) || n.input]))
+    : `${c.name}\u0000${c.label || JSON.stringify(c.input)}`
   let count = 0
   for (let i = calls.length - 1; i >= 0 && key(calls[i]) === key(last); i--) count++
   return count >= threshold ? { name: last.name, label: last.label, count } : undefined
@@ -341,12 +343,16 @@ export function filesTouched(messages: readonly Message[]): FileTouch[] {
     files.set(path, entry)
   }
   for (const call of toolCalls(messages)) {
-    if (call.status !== "completed") continue
-    const input = call.input as Record<string, unknown> | undefined
-    if (WRITE_TOOLS.has(call.name) && typeof input?.path === "string") touch(input.path, call.started)
-    if (call.name === "patch") {
-      const text = Object.values(input ?? {}).find((v): v is string => typeof v === "string" && v.includes("*** "))
-      for (const match of text?.matchAll(PATCH_FILE) ?? []) touch(match[1].trim(), call.started)
+    // Nested tools can succeed before their enclosing execute call fails.
+    const operations = call.nested.length ? call.nested : [{ tool: call.name, status: call.status, input: call.input }]
+    for (const operation of operations) {
+      if (operation.status !== "completed") continue
+      const input = operation.input as Record<string, unknown> | undefined
+      if (WRITE_TOOLS.has(operation.tool) && typeof input?.path === "string") touch(input.path, call.started)
+      if (operation.tool === "patch") {
+        const text = Object.values(input ?? {}).find((v): v is string => typeof v === "string" && v.includes("*** "))
+        for (const match of text?.matchAll(PATCH_FILE) ?? []) touch(match[1].trim(), call.started)
+      }
     }
   }
   return [...files.values()].sort((a, b) => b.last - a.last)

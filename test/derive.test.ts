@@ -50,6 +50,19 @@ const tool = (id: string, name: string, input: Record<string, unknown>, status =
   time: { created: at, ran: at, ...(status === "completed" || status === "error" ? { completed: at + 5 } : {}) },
 })
 
+test("code-mode targets, successful nested writes and zero recent tools", () => {
+  const nested = (path: string, status = "completed") => assistant(path, 1, { content: [{
+    ...tool(path, "execute", { code: "test" }, status),
+    state: { status, input: {}, error: { type: "test", message: "outer failure" }, metadata: { toolCalls: [{ tool: "write", status: "completed", input: { path } }] } },
+  }] }) as any
+  const different = [nested("a.txt"), nested("b.txt"), nested("c.txt")]
+  assert.equal(detectLoop(toolCalls(different), 3), undefined)
+  assert.equal(detectLoop(toolCalls([nested("a.txt"), nested("a.txt"), nested("a.txt")]), 3)?.count, 3)
+  assert.deepEqual(filesTouched(different).map(f => f.path), ["a.txt", "b.txt", "c.txt"])
+  assert.equal(filesTouched([nested("saved.txt", "error")])[0].path, "saved.txt")
+  assert.equal(activity(different, readOptions({ recentTools: 0 })).recent.length, 0)
+})
+
 test("timeline sorts oldest-first and cuts at a staged revert", () => {
   const ordered = timeline(recorded)
   assert.equal(ordered[0].type, "user")
