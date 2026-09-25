@@ -12,34 +12,6 @@ Use `/sidebar` to choose what appears and `/details` to inspect a run.
 *Real workshop screenshot. The Mistral error is a model-backend error surfaced
 by the sidebar, not a sidebar failure. Taken before the sound toggle below was added.*
 
-```text
-▼ Context 5%
-  █░░░░░░░░░░░░░░░░░░░
-  9.2k / 200k · 191k free
-  in 159 · out 110 · cache 9k
-  ▁▁▁▁▁
-▼ Task list 1/3
-  ☑ Create data.csv with header i…
-  ◐ Run: sleep 15 && wc -l data.c…
-  ☐ Write summary.txt with the li…
-▼ Agent activity ● working 14s
-  Build
-  ✓ write data.csv
-  ✓ todo
-  ⟳ shell sleep 15 && wc -l data.…
-  5 tools
-▼ Terminal commands 1 running
-  ⟳ sleep 15 && wc -l data.csv 3s
-▼ Files 1 · ⎇ main
-  data.csv
-▼ Sub-agents 0
-  No delegated agents yet.
-● Sidebar sound on
-› Run details  /details
-```
-
-*Terminal-text illustration using the current labels; not a screenshot or a command to run.*
-
 The context bar uses your theme's selected-action accent normally, and the theme's
 warning/error colours near the limit. Completed tool calls remain readable
 instead of fading into the background. Empty task and subagent sections explain
