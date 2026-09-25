@@ -7,6 +7,11 @@ Use `/sidebar` to choose what appears and `/details` to inspect a run.
 
 ## In the terminal
 
+![Sidebar Plus running in OpenCode with the Ayu Dark theme](docs/sidebar-example.png)
+
+*Real workshop screenshot. The Mistral error is a model-backend error surfaced
+by the sidebar, not a sidebar failure. Taken before the sound toggle below was added.*
+
 ```text
 ▼ Context 5%
   █░░░░░░░░░░░░░░░░░░░
@@ -29,18 +34,19 @@ Use `/sidebar` to choose what appears and `/details` to inspect a run.
   data.csv
 ▼ Sub-agents 0
   No delegated agents yet.
+● Sidebar sound on
 › Run details  /details
 ```
 
 *Terminal-text illustration using the current labels; not a screenshot or a command to run.*
 
-The context bar uses your theme's information colour normally, and the theme's
+The context bar uses your theme's selected-action accent normally, and the theme's
 warning/error colours near the limit. Completed tool calls remain readable
 instead of fading into the background. Empty task and subagent sections explain
 why there is nothing to show yet. Click `▼` / `▶` headings to collapse or expand,
-matching OpenCode's MCP disclosure arrows. Running indicators use the theme's
-information colour; completed tools use success, pending tasks warning, and
-failures error. No RGB palette is hard-coded.
+matching OpenCode's MCP disclosure arrows. Running and completed indicators use
+that same accent; pending items stay muted. Warning/error colours are reserved
+for actual warnings and failures. No RGB palette is hard-coded.
 
 **Agent activity** is the selected agent's recent tool calls (reading files,
 searching, running commands, etc.). **Terminal commands** is the more detailed
@@ -111,6 +117,21 @@ itself, not duplicated here. Desktop command notifications request delivery
 only while the terminal is unfocused; sound is requested regardless of focus.
 OpenCode's attention setting, terminal support, OS permissions and mute/Focus
 settings can still prevent delivery.
+
+Click **● Sidebar sound on / ○ Sidebar sound off** above Run details, or use
+`/sidebar-sound`, to toggle this plugin's command-alert and test sounds. The
+choice is saved across restarts; notifications and toasts remain enabled.
+This is a plugin mute switch, not an OS-volume indicator: it does not change
+OpenCode's own completion/permission sounds or override disabled host attention.
+
+If the test reports `attention_disabled`, enable attention in your existing
+`~/.config/opencode/cli.json` (merge, do not replace its other settings):
+
+```json
+"attention": { "notifications": true, "sound": true, "volume": 0.4 }
+```
+
+Close and reopen the TUI after changing these client settings.
 
 Run `/sidebar-notify-test` to request a sound and desktop notification without
 calling a model. A toast reports what OpenCode attempted or why it skipped the

@@ -31,6 +31,12 @@ export const PANEL = "sidebar-plus.details"
 const WIDTH = 32
 const BAR = 20
 
+// The primary base is ordinary foreground in migrated themes (often white).
+// The selected action token carries the theme's actual interactive accent.
+function accent(ctx: Context) {
+  return ctx.theme.text.action.primary.selected ?? ctx.theme.text.action.primary.base
+}
+
 export type Shared = {
   ctx: Context
   options: Options
@@ -100,7 +106,7 @@ export function ContextSection(props: { shared: Shared; sessionID: string }) {
   const history = createMemo(() => sparkline(contextHistory(s.messages()), BAR, usage()?.limit))
   const color = () => {
     const level = usage()?.level
-    return level === "danger" ? theme.text.feedback.error.base : level === "warn" ? theme.text.feedback.warning.base : theme.text.feedback.info.base
+    return level === "danger" ? theme.text.feedback.error.base : level === "warn" ? theme.text.feedback.warning.base : accent(ctx)
   }
   createEffect(() => {
     const u = usage()
@@ -180,7 +186,7 @@ export function TodoSection(props: { shared: Shared; sessionID: string }) {
   const todo = createMemo(() => todoList(s.messages()))
   const visible = createMemo(() => (todo()?.items ?? []).filter((item) => on("todo.done") || !todoFinished(item)))
   const fg = (status: keyof typeof TODO_ICON) =>
-    status === "in_progress" ? theme.text.feedback.info.base : status === "pending" ? theme.text.feedback.warning.base : status === "completed" ? theme.text.feedback.success.base : theme.text.muted
+    status === "in_progress" || status === "completed" ? accent(ctx) : theme.text.muted
 
   return (
       <Section shared={props.shared} id="todo" title="Task list" summary={todo() ? todoSummary(todo()!.items) : undefined}>
@@ -189,7 +195,7 @@ export function TodoSection(props: { shared: Shared; sessionID: string }) {
         </Show>
         <For each={visible()}>{(item) => <Line fg={fg(item.status)}>{truncate(`${TODO_ICON[item.status]} ${item.text}`, WIDTH)}</Line>}</For>
         <Show when={visible().length === 0 && (todo()?.items.length ?? 0) > 0}>
-          <Line fg={theme.text.feedback.success.base}>{"☑ all done"}</Line>
+          <Line fg={accent(ctx)}>{"☑ all done"}</Line>
         </Show>
       </Section>
   )
@@ -199,7 +205,7 @@ const ICON: Record<ToolCall["status"], string> = { streaming: "…", running: "�
 
 function toolColor(ctx: Context, status: ToolCall["status"]) {
   const t = ctx.theme.text
-  return status === "error" ? t.feedback.error.base : status === "completed" ? t.feedback.success.base : t.feedback.info.base
+  return status === "error" ? t.feedback.error.base : accent(ctx)
 }
 
 export function ActivitySection(props: { shared: Shared; sessionID: string }) {
@@ -222,7 +228,7 @@ export function ActivitySection(props: { shared: Shared; sessionID: string }) {
   })
 
   return (
-      <Section shared={props.shared} id="activity" title="Agent activity" summary={summary()} summaryFg={s.running() ? theme.text.feedback.info.base : theme.text.feedback.success.base}>
+      <Section shared={props.shared} id="activity" title="Agent activity" summary={summary()} summaryFg={accent(ctx)}>
         <Line fg={theme.text.base}>{s.info()?.agent ?? "Agent"}</Line>
         <Show when={!s.running()}><Line fg={theme.text.muted}>Waiting for your next message.</Line></Show>
         <Show when={s.running() && !act().current}><Line fg={theme.text.muted}>Generating a response…</Line></Show>
@@ -265,10 +271,10 @@ export function ShellsSection(props: { shared: Shared; sessionID: string }) {
 
   return (
     <Show when={list().length > 0}>
-      <Section shared={props.shared} id="shells" title="Terminal commands" summary={runningCount() ? `${runningCount()} running` : "finished"} summaryFg={runningCount() ? theme.text.feedback.info.base : theme.text.feedback.success.base}>
+      <Section shared={props.shared} id="shells" title="Terminal commands" summary={runningCount() ? `${runningCount()} running` : "finished"} summaryFg={accent(ctx)}>
         <For each={list()}>
           {(cmd) => {
-            const fg = () => (cmd.running ? theme.text.feedback.info.base : cmd.ok ? theme.text.feedback.success.base : theme.text.feedback.error.base)
+            const fg = () => (cmd.running || cmd.ok ? accent(ctx) : theme.text.feedback.error.base)
             const tail = () => (cmd.running ? formatDuration(now() - cmd.started) : `${cmd.status} · ${formatDuration((cmd.ended ?? cmd.started) - cmd.started)}`)
             return <Line fg={fg()}>{`${truncate(`${cmd.running ? "⟳" : cmd.ok ? "✓" : "✗"} ${cmd.command}`, WIDTH - tail().length - 1)} ${tail()}`}</Line>
           }}
@@ -320,7 +326,7 @@ export function SubagentsSection(props: { shared: Shared; sessionID: string }) {
             const tokens = () => child.tokens.input + child.tokens.output + child.tokens.reasoning
             return (
               <box flexDirection="row" gap={1} onMouseUp={() => ctx.ui.router.navigate({ type: "session", sessionID: child.id })}>
-                <text fg={running() ? theme.text.feedback.info.base : theme.text.feedback.success.base}>{running() ? "●" : "○"}</text>
+                <text fg={accent(ctx)}>{running() ? "●" : "○"}</text>
                 <text fg={theme.text.base}>{truncate(`${child.agent ?? "agent"} ${child.title ?? ""}`, WIDTH - 10)}</text>
                 <text fg={theme.text.muted}>{formatTokens(tokens())}</text>
               </box>
@@ -334,7 +340,7 @@ export function SubagentsSection(props: { shared: Shared; sessionID: string }) {
 export function DetailsHint(props: { shared: Shared }) {
   const { ctx } = props.shared
   return (
-    <text fg={ctx.theme.text.action.primary.base} onMouseUp={() => ctx.ui.panel.open(PANEL)}>
+    <text fg={accent(ctx)} onMouseUp={() => ctx.ui.panel.open(PANEL)}>
       {"› Run details  /details"}
     </text>
   )

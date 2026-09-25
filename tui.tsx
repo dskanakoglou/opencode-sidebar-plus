@@ -31,6 +31,11 @@ const plugin: Plugin.Definition = {
   id: "sidebar-plus",
   setup(ctx) {
     const options = readOptions(ctx.options)
+    const [audio, updateAudio] = ctx.storage.store("sound", { initial: { enabled: true } })
+    const toggleSound = async () => {
+      await updateAudio((draft) => { draft.enabled = !draft.enabled })
+      ctx.ui.toast.show({ variant: "info", message: `Sidebar sound ${audio.enabled ? "on" : "off"}. OpenCode's own sounds and OS settings are separate.` })
+    }
     const [sections, updateSections] = ctx.storage.store("sections", { initial: { collapsed: {} as Record<string, boolean> } })
     const [toggles, updateToggles] = ctx.storage.store("features", { initial: { overrides: {} as Record<string, boolean> } })
     const on = (id: FeatureID) => resolveFeatures(options.features, toggles.overrides)[id]
@@ -48,7 +53,7 @@ const plugin: Plugin.Definition = {
       const title = ok ? "Command finished" : "Command failed"
       const message = `${truncate(run.command, 60)} · ${failure ?? `exit ${exit ?? 0}`} · ${formatDuration(ran)}`
       void ctx.attention
-        .notify({ title, message, notification: { when: "blurred" }, sound: { name: ok ? "done" : "error", when: "always" } })
+        .notify({ title, message, notification: { when: "blurred" }, sound: audio.enabled ? { name: ok ? "done" : "error", when: "always" } : false })
         .catch(() => {})
       ctx.ui.toast.show({ variant: ok ? "success" : "error", title, message, sessionID: run.sessionID })
     }
@@ -107,7 +112,13 @@ const plugin: Plugin.Definition = {
       }),
       ctx.ui.slot({
         append: "sidebar.content",
-        render: () => <Show when={on("details")}><DetailsHint shared={shared} /></Show>,
+        render: () => <box gap={1}>
+          <text
+            fg={audio.enabled ? ctx.theme.text.action.primary.selected ?? ctx.theme.text.action.primary.base : ctx.theme.text.muted}
+            onMouseUp={() => void toggleSound().catch(() => ctx.ui.toast.show({ variant: "error", message: "Could not save sound preference." }))}
+          >{`${audio.enabled ? "●" : "○"} Sidebar sound ${audio.enabled ? "on" : "off"}`}</text>
+          <Show when={on("details")}><DetailsHint shared={shared} /></Show>
+        </box>,
       }),
       ctx.ui.slot({
         append: "session.panel",
@@ -124,6 +135,15 @@ const plugin: Plugin.Definition = {
             mode: "global",
             commands: [
               {
+                id: "sidebar-plus.sound",
+                title: "Toggle sidebar sound",
+                description: "Mute or enable this plugin's sounds (not OpenCode's own alerts)",
+                group: "Sidebar",
+                palette: true,
+                slash: { name: "sidebar-sound" },
+                run: () => toggleSound(),
+              },
+              {
                 id: "sidebar-plus.notify-test",
                 title: "Test sidebar sound and notification",
                 description: "Request a test ping and show whether OpenCode delivered it",
@@ -136,7 +156,7 @@ const plugin: Plugin.Definition = {
                       title: "Sidebar Plus test",
                       message: "Notification test — no model request was made.",
                       notification: { when: "always" },
-                      sound: { name: "done", when: "always" },
+                      sound: audio.enabled ? { name: "done", when: "always" } : false,
                     })
                     ctx.ui.toast.show({
                       variant: result.ok ? "info" : "warning",
