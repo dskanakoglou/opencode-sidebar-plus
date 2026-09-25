@@ -2,13 +2,10 @@
 
 A sidebar for the [OpenCode](https://opencode.ai) **v2** terminal UI. It shows how full the context window is, the agent's to-do list, what it is doing right now, and anything that needs attention, without scrolling the transcript. Every section and every part of a section can be switched on or off.
 
-![Sidebar Plus overview: conversation, context, tasks, tool activity and child agents](docs/sidebar-overview.svg)
-
 **See what your agent is doing without losing your place in the conversation.**
 Use `/sidebar` to choose what appears and `/details` to inspect a run.
 
-<details>
-<summary>Compact terminal example</summary>
+## In the terminal
 
 ```text
 ▼ Context 5%
@@ -16,25 +13,40 @@ Use `/sidebar` to choose what appears and `/details` to inspect a run.
   9.2k / 200k · 191k free
   in 159 · out 110 · cache 9k
   ▁▁▁▁▁
-▼ To-do 1/3
+▼ Task list 1/3
   ☑ Create data.csv with header i…
   ◐ Run: sleep 15 && wc -l data.c…
   ☐ Write summary.txt with the li…
-▼ Activity ● 14s
+▼ Agent activity ● working 14s
+  Build
   ✓ write data.csv
   ✓ todo
   ⟳ shell sleep 15 && wc -l data.…
   5 tools
-▼ Shells 1 running
+▼ Terminal commands 1 running
   ⟳ sleep 15 && wc -l data.csv 3s
 ▼ Files 1 · ⎇ main
   data.csv
-› details (/details)
+▼ Sub-agents 0
+  No delegated agents yet.
+› Run details  /details
 ```
 
-*(Assembled from screens captured during real runs with the `opencode/big-pickle` model.)*
+*Terminal-text illustration using the current labels; not a screenshot or a command to run.*
 
-</details>
+The context bar uses your theme's information colour normally, and the theme's
+warning/error colours near the limit. Completed tool calls remain readable
+instead of fading into the background. Empty task and subagent sections explain
+why there is nothing to show yet. Click `▼` / `▶` headings to collapse or expand,
+matching OpenCode's MCP disclosure arrows. Running indicators use the theme's
+information colour; completed tools use success, pending tasks warning, and
+failures error. No RGB palette is hard-coded.
+
+**Agent activity** is the selected agent's recent tool calls (reading files,
+searching, running commands, etc.). **Terminal commands** is the more detailed
+view of shell execution, including exit codes and durations. The same command
+can appear in both: one is the action history, the other is execution status.
+Use `/sidebar` to hide either if you prefer a more compact view.
 
 Requires OpenCode **2.0.16 or later**. It does not work on OpenCode 1.x: v1 plugins use a different plugin format, so the two are incompatible in both directions.
 
@@ -52,7 +64,7 @@ of every installed agent. Open a child to inspect its own children.
 The other sections follow the **currently viewed session**. Your active primary
 agent and model are selected in OpenCode's existing UI; this plugin does not add
 a separate primary-agent selector. It observes delegation, it does not create
-agents or coordinate them. The section remains hidden until children exist.
+agents or coordinate them. An empty section says “No delegated agents yet.”
 
 ## At a glance
 
@@ -92,6 +104,22 @@ Click a section title to collapse it. The collapsed state is remembered across r
 - the input looks truncated.
 
 The last three fire once per session, and only while that session is running.
+
+**No ping?** Commands shorter than 20 seconds do not trigger the extra command
+alert by default. Session completion/permission alerts are handled by OpenCode
+itself, not duplicated here. Desktop command notifications request delivery
+only while the terminal is unfocused; sound is requested regardless of focus.
+OpenCode's attention setting, terminal support, OS permissions and mute/Focus
+settings can still prevent delivery.
+
+Run `/sidebar-notify-test` to request a sound and desktop notification without
+calling a model. A toast reports what OpenCode attempted or why it skipped the
+request; this cannot prove the OS displayed a banner or that a sound was audible.
+To alert on short commands too, set `shellNotifyAfter: 0` in plugin options.
+
+**Details is a panel inside OpenCode**, not another app or terminal window.
+Its link is appended after the sidebar's other content, including built-in MCP
+entries. `/details` opens the same view.
 
 ## Turning things on and off
 

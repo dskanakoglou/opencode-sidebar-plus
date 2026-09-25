@@ -102,11 +102,12 @@ const plugin: Plugin.Definition = {
                 })
               }
             </For>
-            <Show when={on("details")}>
-              <DetailsHint shared={shared} />
-            </Show>
           </box>
         ),
+      }),
+      ctx.ui.slot({
+        append: "sidebar.content",
+        render: () => <Show when={on("details")}><DetailsHint shared={shared} /></Show>,
       }),
       ctx.ui.slot({
         append: "session.panel",
@@ -122,6 +123,32 @@ const plugin: Plugin.Definition = {
           ctx.keymap.layer(() => ({
             mode: "global",
             commands: [
+              {
+                id: "sidebar-plus.notify-test",
+                title: "Test sidebar sound and notification",
+                description: "Request a test ping and show whether OpenCode delivered it",
+                group: "Sidebar",
+                palette: true,
+                slash: { name: "sidebar-notify-test" },
+                run: async () => {
+                  try {
+                    const result = await ctx.attention.notify({
+                      title: "Sidebar Plus test",
+                      message: "Notification test — no model request was made.",
+                      notification: { when: "always" },
+                      sound: { name: "done", when: "always" },
+                    })
+                    ctx.ui.toast.show({
+                      variant: result.ok ? "info" : "warning",
+                      title: "Notification test",
+                      message: `Sound: ${result.sound ? "requested" : "not sent"}; notification: ${result.notification ? "requested" : "not sent"}${result.skipped ? `; ${result.skipped}` : ""}. OS and terminal settings still apply.`,
+                      duration: 10000,
+                    })
+                  } catch {
+                    ctx.ui.toast.show({ variant: "warning", message: "Notification test failed. Check OpenCode attention and terminal/OS notification settings." })
+                  }
+                },
+              },
               {
                 id: "sidebar-plus.details",
                 title: "Session details",

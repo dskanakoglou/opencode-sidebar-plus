@@ -72,7 +72,7 @@ function Section(props: { shared: Shared; id: string; title: string; summary?: s
   return (
     <box>
       <box flexDirection="row" gap={1} onMouseUp={() => props.shared.toggle(props.id)}>
-        <text fg={theme.text.muted}>{collapsed() ? "▶" : "▼"}</text>
+        <text fg={theme.text.base}>{collapsed() ? "▶" : "▼"}</text>
         <text fg={theme.text.base}>
           <b>{props.title}</b>
         </text>
@@ -100,7 +100,7 @@ export function ContextSection(props: { shared: Shared; sessionID: string }) {
   const history = createMemo(() => sparkline(contextHistory(s.messages()), BAR, usage()?.limit))
   const color = () => {
     const level = usage()?.level
-    return level === "danger" ? theme.text.feedback.error.base : level === "warn" ? theme.text.feedback.warning.base : theme.text.feedback.success.base
+    return level === "danger" ? theme.text.feedback.error.base : level === "warn" ? theme.text.feedback.warning.base : theme.text.feedback.info.base
   }
   createEffect(() => {
     const u = usage()
@@ -140,7 +140,7 @@ export function ContextSection(props: { shared: Shared; sessionID: string }) {
                 </box>
               </Show>
               <Show when={on("context.numbers")}>
-              <Line fg={theme.text.muted}>
+              <Line fg={theme.text.base}>
                 {u().limit ? `${formatTokens(u().used)} / ${formatTokens(u().limit!)} · ${formatTokens(u().free!)} free` : `${formatTokens(u().used)} tokens`}
               </Line>
               </Show>
@@ -150,7 +150,7 @@ export function ContextSection(props: { shared: Shared; sessionID: string }) {
               </Line>
               </Show>
               <Show when={on("context.sparkline") && history().length > 1}>
-                <Line fg={theme.text.muted}>{history()}</Line>
+                <Line fg={theme.text.muted}>{`history ${history()}`}</Line>
               </Show>
               <Show when={on("context.compaction") && (u().compactAt !== undefined || u().compactions > 0)}>
                 <Line fg={theme.text.muted}>
@@ -180,17 +180,18 @@ export function TodoSection(props: { shared: Shared; sessionID: string }) {
   const todo = createMemo(() => todoList(s.messages()))
   const visible = createMemo(() => (todo()?.items ?? []).filter((item) => on("todo.done") || !todoFinished(item)))
   const fg = (status: keyof typeof TODO_ICON) =>
-    status === "in_progress" ? theme.text.feedback.info.base : status === "pending" ? theme.text.base : theme.text.muted
+    status === "in_progress" ? theme.text.feedback.info.base : status === "pending" ? theme.text.feedback.warning.base : status === "completed" ? theme.text.feedback.success.base : theme.text.muted
 
   return (
-    <Show when={todo() && todo()!.items.length > 0}>
-      <Section shared={props.shared} id="todo" title="To-do" summary={todoSummary(todo()!.items)}>
+      <Section shared={props.shared} id="todo" title="Task list" summary={todo() ? todoSummary(todo()!.items) : undefined}>
+        <Show when={!todo() || !todo()!.items.length}>
+          <Line fg={theme.text.muted}>No tasks recorded yet.</Line>
+        </Show>
         <For each={visible()}>{(item) => <Line fg={fg(item.status)}>{truncate(`${TODO_ICON[item.status]} ${item.text}`, WIDTH)}</Line>}</For>
-        <Show when={visible().length === 0}>
+        <Show when={visible().length === 0 && (todo()?.items.length ?? 0) > 0}>
           <Line fg={theme.text.feedback.success.base}>{"☑ all done"}</Line>
         </Show>
       </Section>
-    </Show>
   )
 }
 
@@ -198,7 +199,7 @@ const ICON: Record<ToolCall["status"], string> = { streaming: "…", running: "�
 
 function toolColor(ctx: Context, status: ToolCall["status"]) {
   const t = ctx.theme.text
-  return status === "error" ? t.feedback.error.base : status === "completed" ? t.muted : t.feedback.info.base
+  return status === "error" ? t.feedback.error.base : status === "completed" ? t.feedback.success.base : t.feedback.info.base
 }
 
 export function ActivitySection(props: { shared: Shared; sessionID: string }) {
@@ -207,7 +208,7 @@ export function ActivitySection(props: { shared: Shared; sessionID: string }) {
   const s = useSession(props.shared, () => props.sessionID)
   const act = createMemo(() => activity(s.messages(), options))
   const now = useNow(s.running)
-  const summary = () => (s.running() ? `● ${formatDuration(now() - (act().turnStarted ?? now()))}` : "○ idle")
+  const summary = () => (s.running() ? `● working ${formatDuration(now() - (act().turnStarted ?? now()))}` : "○ ready")
   createEffect(() => {
     const loop = act().loop
     if (!loop || !on("alerts.loop") || !s.running()) return
@@ -221,8 +222,10 @@ export function ActivitySection(props: { shared: Shared; sessionID: string }) {
   })
 
   return (
-    <Show when={act().total > 0 || s.running()}>
-      <Section shared={props.shared} id="activity" title="Activity" summary={summary()} summaryFg={s.running() ? theme.text.feedback.info.base : theme.text.muted}>
+      <Section shared={props.shared} id="activity" title="Agent activity" summary={summary()} summaryFg={s.running() ? theme.text.feedback.info.base : theme.text.feedback.success.base}>
+        <Line fg={theme.text.base}>{s.info()?.agent ?? "Agent"}</Line>
+        <Show when={!s.running()}><Line fg={theme.text.muted}>Waiting for your next message.</Line></Show>
+        <Show when={s.running() && !act().current}><Line fg={theme.text.muted}>Generating a response…</Line></Show>
         <For each={on("activity.tools") ? act().recent : []}>
           {(call) => (
             <Line fg={toolColor(ctx, call.status)}>
@@ -244,7 +247,6 @@ export function ActivitySection(props: { shared: Shared; sessionID: string }) {
           {(error) => <Line fg={theme.text.feedback.error.base}>{truncate(`✗ ${error()}`, WIDTH * 2)}</Line>}
         </Show>
       </Section>
-    </Show>
   )
 }
 
@@ -263,10 +265,10 @@ export function ShellsSection(props: { shared: Shared; sessionID: string }) {
 
   return (
     <Show when={list().length > 0}>
-      <Section shared={props.shared} id="shells" title="Shells" summary={runningCount() ? `${runningCount()} running` : undefined} summaryFg={theme.text.feedback.info.base}>
+      <Section shared={props.shared} id="shells" title="Terminal commands" summary={runningCount() ? `${runningCount()} running` : "finished"} summaryFg={runningCount() ? theme.text.feedback.info.base : theme.text.feedback.success.base}>
         <For each={list()}>
           {(cmd) => {
-            const fg = () => (cmd.running ? theme.text.feedback.info.base : cmd.ok ? theme.text.muted : theme.text.feedback.error.base)
+            const fg = () => (cmd.running ? theme.text.feedback.info.base : cmd.ok ? theme.text.feedback.success.base : theme.text.feedback.error.base)
             const tail = () => (cmd.running ? formatDuration(now() - cmd.started) : `${cmd.status} · ${formatDuration((cmd.ended ?? cmd.started) - cmd.started)}`)
             return <Line fg={fg()}>{`${truncate(`${cmd.running ? "⟳" : cmd.ok ? "✓" : "✗"} ${cmd.command}`, WIDTH - tail().length - 1)} ${tail()}`}</Line>
           }}
@@ -310,15 +312,15 @@ export function SubagentsSection(props: { shared: Shared; sessionID: string }) {
   const active = () => children().filter((child) => ctx.data.session.status(child.id) === "running").length
 
   return (
-    <Show when={children().length > 0}>
       <Section shared={props.shared} id="subagents" title="Sub-agents" summary={active() ? `${active()} running` : String(children().length)}>
+        <Show when={children().length === 0}><Line fg={theme.text.muted}>No delegated agents yet.</Line></Show>
         <For each={children().slice(0, 5)}>
           {(child) => {
             const running = () => ctx.data.session.status(child.id) === "running"
             const tokens = () => child.tokens.input + child.tokens.output + child.tokens.reasoning
             return (
               <box flexDirection="row" gap={1} onMouseUp={() => ctx.ui.router.navigate({ type: "session", sessionID: child.id })}>
-                <text fg={running() ? theme.text.feedback.info.base : theme.text.muted}>{running() ? "●" : "○"}</text>
+                <text fg={running() ? theme.text.feedback.info.base : theme.text.feedback.success.base}>{running() ? "●" : "○"}</text>
                 <text fg={theme.text.base}>{truncate(`${child.agent ?? "agent"} ${child.title ?? ""}`, WIDTH - 10)}</text>
                 <text fg={theme.text.muted}>{formatTokens(tokens())}</text>
               </box>
@@ -326,15 +328,14 @@ export function SubagentsSection(props: { shared: Shared; sessionID: string }) {
           }}
         </For>
       </Section>
-    </Show>
   )
 }
 
 export function DetailsHint(props: { shared: Shared }) {
   const { ctx } = props.shared
   return (
-    <text fg={ctx.theme.text.muted} onMouseUp={() => ctx.ui.panel.open(PANEL)}>
-      {"› details (/details)"}
+    <text fg={ctx.theme.text.action.primary.base} onMouseUp={() => ctx.ui.panel.open(PANEL)}>
+      {"› Run details  /details"}
     </text>
   )
 }

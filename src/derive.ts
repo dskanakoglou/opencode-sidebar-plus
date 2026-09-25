@@ -13,9 +13,9 @@ export type SectionID = (typeof SECTIONS)[number]
 // All default to on. Section switches share their id with the section.
 export const FEATURES = [
   { id: "context", group: "Sections", title: "Context", description: "Context window usage" },
-  { id: "todo", group: "Sections", title: "To-do", description: "The agent's to-do list (needs the server half of the plugin)" },
-  { id: "activity", group: "Sections", title: "Activity", description: "Running/idle, recent tool calls, warnings" },
-  { id: "shells", group: "Sections", title: "Shells", description: "Commands the agent ran and background shells" },
+  { id: "todo", group: "Sections", title: "Task list", description: "The agent's to-do list (needs the server half of the plugin)" },
+  { id: "activity", group: "Sections", title: "Agent activity", description: "Current agent, running/ready, recent tool calls, warnings" },
+  { id: "shells", group: "Sections", title: "Terminal commands", description: "Commands the agent ran, exit codes and durations" },
   { id: "files", group: "Sections", title: "Files", description: "Files written or edited this session" },
   { id: "subagents", group: "Sections", title: "Sub-agents", description: "Child sessions" },
   { id: "details", group: "Sections", title: "Details link", description: "The '› details' line under the sidebar" },
