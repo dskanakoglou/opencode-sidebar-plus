@@ -2,7 +2,15 @@
 
 A sidebar for the [OpenCode](https://opencode.ai) **v2** terminal UI. It shows how full the context window is, the agent's to-do list, what it is doing right now, and anything that needs attention, without scrolling the transcript. Every section and every part of a section can be switched on or off.
 
-```
+![Sidebar Plus overview: conversation, context, tasks, tool activity and child agents](docs/sidebar-overview.svg)
+
+**See what your agent is doing without losing your place in the conversation.**
+Use `/sidebar` to choose what appears and `/details` to inspect a run.
+
+<details>
+<summary>Compact terminal example</summary>
+
+```text
 ▼ Context 5%
   █░░░░░░░░░░░░░░░░░░░
   9.2k / 200k · 191k free
@@ -26,7 +34,41 @@ A sidebar for the [OpenCode](https://opencode.ai) **v2** terminal UI. It shows h
 
 *(Assembled from screens captured during real runs with the `opencode/big-pickle` model.)*
 
+</details>
+
 Requires OpenCode **2.0.16 or later**. It does not work on OpenCode 1.x: v1 plugins use a different plugin format, so the two are incompatible in both directions.
+
+[Install](#install) · [Capabilities](#what-it-shows) · [Agents and subagents](#agents-and-subagents) · [Controls](#turning-things-on-and-off) · [Options](#options)
+
+## Agents and subagents
+
+**Yes, you can see delegated subagents.** The Sub-agents section shows direct
+child sessions of the conversation you are viewing: agent name (when supplied
+by OpenCode), session title, running indicator and token count. Click a child
+to open its conversation. Up to five recent children are displayed; the running
+count covers all direct children. This is not a recursive swarm tree or a list
+of every installed agent. Open a child to inspect its own children.
+
+The other sections follow the **currently viewed session**. Your active primary
+agent and model are selected in OpenCode's existing UI; this plugin does not add
+a separate primary-agent selector. It observes delegation, it does not create
+agents or coordinate them. The section remains hidden until children exist.
+
+## At a glance
+
+| Question | Where to look |
+|---|---|
+| How full is this conversation? | **Context**: token budget, breakdown, growth and optional compaction threshold |
+| What remains to be done? | **To-do**: the latest task list submitted by the agent |
+| Is it making progress? | **Activity**: tools, duration, failures, retries and repeated-target warnings |
+| Is a command still running? | **Shells**: live timers, completed commands and exit codes |
+| What did it change? | **Files**: recorded writes, edits and patches, including code-mode operations |
+| What are its specialists doing? | **Sub-agents**: direct child sessions; click through to their conversations |
+| What happened over the whole run? | **Details**: per-turn statistics, context history and recent tool calls |
+
+Task lists are agent-reported, not proof of completion. Loop and truncation
+warnings are heuristics. The Files section reflects recorded tool operations,
+not a filesystem audit: arbitrary shell writes are not automatically detected.
 
 ## What it shows
 
