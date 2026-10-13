@@ -349,7 +349,8 @@ export function activity(messages: readonly Message[], options: Pick<Options, "r
 // only incidental arguments (offset, limit, key order). Match on name + target.
 export function detectLoop(calls: readonly ToolCall[], threshold: number): Activity["loop"] {
   const last = calls.at(-1)
-  if (!last) return
+  // several delegations alike are a fan-out to parallel sub-agents, not a loop
+  if (!last || last.name === DELEGATE_TOOL) return
   const key = (c: ToolCall) => c.nested.length
     ? JSON.stringify(c.nested.map((n) => [n.tool, toolLabel(n.input) || n.input]))
     : `${c.name}\u0000${c.label || JSON.stringify(c.input)}`
@@ -1028,4 +1029,41 @@ export function reportMarkdown(input: {
 /** Tool calls, failures and shell commands among `calls`, for the per-agent table. */
 export function callStats(calls: readonly ToolCall[]): Pick<AgentStat, "tools" | "failed" | "commands"> {
   return { tools: calls.length, failed: calls.filter((c) => c.status === "error").length, commands: calls.filter((c) => c.name === "shell").length }
+}
+
+// ---------------------------------------------------------------------------
+// Alerts: shown in the sidebar instead of pop-ups that would cover it.
+
+export type AlertTone = "info" | "success" | "warning" | "error"
+
+export type AlertInput = {
+  /** Alerts with the same key merge into one line instead of stacking. */
+  key: string
+  tone: AlertTone
+  glyph: string
+  text: string
+  /** The longer explanation a pop-up shows under the text. */
+  detail?: string
+  sessionID?: string
+  /** The text once a second alert with this key arrives; gets the new count. */
+  merged?: (count: number) => string
+}
+
+export type Alert = Omit<AlertInput, "merged"> & { id: number; at: number; count: number }
+
+export const ALERT_TTL = { info: 60_000, success: 60_000, warning: 120_000, error: 120_000 } satisfies Record<AlertTone, number>
+
+/** The live alerts, newest first: expired ones dropped, `input` merged into its key's line or added on top. */
+export function addAlert(list: readonly Alert[], input: AlertInput, id: number, now: number): Alert[] {
+  const live = list.filter((a) => now - a.at < ALERT_TTL[a.tone])
+  const same = live.find((a) => a.key === input.key)
+  const { merged, ...fields } = input
+  const count = (same?.count ?? 0) + 1
+  const alert: Alert = { ...fields, text: same && merged ? merged(count) : input.text, id: same?.id ?? id, at: now, count }
+  return [alert, ...live.filter((a) => a !== same)]
+}
+
+/** Alerts still live at `now`, newest first, at most `limit`. */
+export function liveAlerts(list: readonly Alert[], now: number, limit: number): Alert[] {
+  return list.filter((a) => now - a.at < ALERT_TTL[a.tone]).slice(0, limit)
 }

@@ -5,6 +5,7 @@ import { createSignal, For, onCleanup, Show } from "solid-js"
 import type { Plugin } from "@opencode/plugin/tui"
 import type { ShellInfo } from "@opencode/client"
 import {
+  addAlert,
   FEATURES,
   formatDuration,
   matchPreset,
@@ -16,12 +17,15 @@ import {
   sectionOrder,
   throttle,
   truncate,
+  type Alert,
+  type AlertInput,
   type FeatureID,
   type PresetID,
   type SectionID,
 } from "./src/derive.ts"
 import {
   ActivitySection,
+  AlertsStrip,
   ContextSection,
   DetailsPanel,
   FilesSection,
@@ -82,7 +86,14 @@ const plugin: Plugin.Definition = {
       void ctx.attention
         .notify({ title, message, notification: { when: "blurred" }, sound: audio.enabled ? { name: ok ? "done" : "error", when: "always" } : false })
         .catch(() => {})
-      ctx.ui.toast.show({ variant: ok ? "success" : "error", title, message, sessionID: run.sessionID })
+      notify({
+        key: `command:${id}`,
+        tone: ok ? "success" : "error",
+        glyph: ok ? "✓" : "✗",
+        text: `${truncate(run.command, 40)} · ${failure ?? `exit ${exit ?? 0}`}`,
+        detail: message,
+        sessionID: run.sessionID,
+      })
     }
     // The mouse pointer: an arrow over the whole TUI and a hand while anything of
     // the plugin's that can be clicked is hovered; the terminal's own on exit.
@@ -125,13 +136,41 @@ const plugin: Plugin.Definition = {
       const route = ctx.ui.router.current()
       return route.type === "session" ? route.sessionID : undefined
     }
+
+    // Alerts go to the strip at the top of the sidebar while it is on screen, so
+    // nothing pops up over it. While it is hidden, or with the strip switched off,
+    // they pop up one at a time, repeats merged, so they never stack.
+    const [alertSetting, updateAlertSetting] = ctx.storage.store("alerts", { initial: { inBar: true } })
+    const [alertList, updateAlertList] = ctx.storage.memory("alert-list", { initial: { list: [] as Alert[] } })
+    let alertID = 0
+    const POP = 4000
+    let waiting: Alert[] = []
+    let popping = false
+    const popNext = () => {
+      const next = waiting.shift()
+      popping = next !== undefined
+      if (!next) return
+      const line = `${next.glyph} ${next.text}`
+      ctx.ui.toast.show({ variant: next.tone, title: next.detail ? line : undefined, message: next.detail ?? line, sessionID: next.sessionID, duration: POP })
+      setTimeout(popNext, POP + 300)
+    }
+    const notify = (input: AlertInput) => {
+      // one list counts repeats either way, and is what the strip shows
+      updateAlertList((draft) => void (draft.list = addAlert(draft.list, input, ++alertID, Date.now())))
+      if (alertSetting.inBar && sidebars() > 0) return
+      const alert = alertList.list[0]
+      waiting = [...waiting.filter((a) => a.key !== alert.key), alert]
+      if (!popping) popNext()
+    }
+    const dismiss = (id: number) => updateAlertList((draft) => void (draft.list = draft.list.filter((a) => a.id !== id)))
+
     const inSession = (then: (sessionID: string) => unknown) => {
       const sessionID = currentSession()
       if (sessionID) return void then(sessionID)
-      ctx.ui.toast.show({ variant: "info", message: "Open a session first." })
+      notify({ key: "no-session", tone: "info", glyph: "·", text: "open a session first" })
     }
     const failed = (what: string) => (error: unknown) =>
-      ctx.ui.toast.show({ variant: "error", title: what, message: error instanceof Error ? error.message : String(error) })
+      notify({ key: `failed:${what}`, tone: "error", glyph: "✗", text: what.toLowerCase(), detail: error instanceof Error ? error.message : String(error) })
 
     // Run a command the user types: in the chat (like `!` in the prompt, so the
     // agent sees the output) or as a background shell (under Terminal commands).
@@ -169,7 +208,7 @@ const plugin: Plugin.Definition = {
     const saveReport = async (sessionID: string) => {
       const at = Date.now()
       const overview = runOverview(shared, sessionID, at, 100)
-      if (!overview.directory) return ctx.ui.toast.show({ variant: "error", message: "This session has no folder to save into." })
+      if (!overview.directory) return notify({ key: "report", tone: "error", glyph: "✗", text: "no session folder to save into" })
       const path = (await ctx.ui.dialog.prompt({ title: "Save run report", description: `Markdown, saved under ${basename(overview.directory)}/`, value: reportPath(overview.title, at) }))?.trim()
       if (!path) return
       const file = isAbsolute(path) ? path : join(overview.directory, path)
@@ -178,7 +217,7 @@ const plugin: Plugin.Definition = {
       try {
         await mkdir(dirname(file), { recursive: true })
         await writeFile(file, reportMarkdown({ ...overview, at }))
-        ctx.ui.toast.show({ variant: "success", title: "Report saved", message: path })
+        notify({ key: "report", tone: "success", glyph: "↓", text: `report saved · ${path}`, detail: path })
       } catch (error) {
         failed("Report not saved")(error)
       }
@@ -213,6 +252,9 @@ const plugin: Plugin.Definition = {
         report: (sessionID) => void saveReport(sessionID),
       },
       reports,
+      notify,
+      alerts: () => alertList.list,
+      dismiss,
     }
 
     const reset = () =>
@@ -247,6 +289,7 @@ const plugin: Plugin.Definition = {
           // the dialog puts its own dot on `current`, so states are words here
           ...PRESETS.map((p) => ({ title: row(p.title, active === p.id ? "✓" : ""), value: `preset:${p.id}`, description: PRESET_SHORT[p.id], category: "Layout" })),
           ...FEATURES.map((f) => ({ title: row(f.title, onOff(on(f.id))), value: f.id as string, description: f.description, category: f.group })),
+          { title: row("Alerts in sidebar", onOff(alertSetting.inBar)), value: "alerts", description: "instead of pop-ups over it", category: "Settings" },
           { title: row("Sidebar sound", onOff(audio.enabled)), value: "sound", description: "this plugin's sound only", category: "Settings" },
           { title: row("Run reports", onOff(reports())), value: "reports", description: "allow saving reports", category: "Settings" },
           { title: row("Reset to config defaults"), value: "reset", description: "forget what was picked here", category: "Settings" },
@@ -264,6 +307,7 @@ const plugin: Plugin.Definition = {
           draft.preset = picked.slice("preset:".length) as PresetID
           draft.overrides = {}
         }).catch(() => {})
+      else if (picked === "alerts") await updateAlertSetting((draft) => void (draft.inBar = !draft.inBar)).catch(() => {})
       else if (picked === "sound") await updateAudio((draft) => void (draft.enabled = !draft.enabled)).catch(() => {})
       else if (picked === "reports") await updateReport((draft) => void (draft.enabled = !reports())).catch(() => {})
       else await updateToggles((draft) => void (draft.overrides[picked] = !on(picked as FeatureID))).catch(() => {})
@@ -289,9 +333,17 @@ const plugin: Plugin.Definition = {
       if (!info || !on("alerts.agents")) return
       const name = info.agent ?? "Sub-agent"
       const took = began ? ` · ${formatDuration(Date.now() - began)}` : ""
-      const variant = outcome === "succeeded" ? "success" : "warning"
-      const verb = outcome === "succeeded" ? "finished" : "was interrupted"
-      ctx.ui.toast.show({ variant, title: `${name} ${verb}`, message: `${truncate(info.title ?? "", 80)}${took}`, sessionID })
+      const done = outcome === "succeeded"
+      // a swarm finishing is one line, "5 agents finished", not five pop-ups
+      notify({
+        key: `${outcome}:${ctx.data.session.root(sessionID)}`,
+        tone: done ? "success" : "warning",
+        glyph: done ? "✓" : "⊘",
+        text: `${name} ${done ? "finished" : "was interrupted"}${took}`,
+        detail: truncate(info.title ?? "", 80),
+        sessionID,
+        merged: (n) => `${n} agents ${done ? "finished" : "interrupted"}`,
+      })
     }
 
     const cleanups = [
@@ -302,6 +354,9 @@ const plugin: Plugin.Definition = {
           onCleanup(() => setSidebars((n) => n - 1))
           return (
             <box gap={1}>
+              <Show when={alertSetting.inBar}>
+                <AlertsStrip shared={shared} />
+              </Show>
               <For each={sectionOrder(options.sections, on("subagents") && on("subagents.top") && hasAgents(ctx, input.sessionID)).filter((id) => on(id) || (id === "shells" && userShells()))}>
                 {(id) =>
                   SECTION_VIEWS[id]({
@@ -419,20 +474,24 @@ const plugin: Plugin.Definition = {
         const info = child(event.data.sessionID)
         if (!info || !on("alerts.agents") || !askedRecently.fresh(event.data.sessionID, event.created)) return
         const what = [event.data.action, ...event.data.resources.slice(0, 1)].join(" ")
-        ctx.ui.toast.show({
-          variant: "warning",
-          title: `${info.agent ?? "Sub-agent"} needs approval`,
-          message: `${truncate(what, 60)}. Answer the permission prompt, or click ${info.agent ?? "its row"} under Agents.`,
+        notify({
+          key: `approval:${event.data.sessionID}`,
+          tone: "warning",
+          glyph: "◆",
+          text: `${info.agent ?? "sub-agent"} needs approval`,
+          detail: `${truncate(what, 60)}. Answer the permission prompt, or click ${info.agent ?? "its row"} under Agents.`,
           sessionID: event.data.sessionID,
         })
       }),
       ctx.data.on("form.created", (event) => {
         const info = child(event.data.form.sessionID)
         if (!info || !on("alerts.agents") || !askedRecently.fresh(event.data.form.sessionID, event.created)) return
-        ctx.ui.toast.show({
-          variant: "warning",
-          title: `${info.agent ?? "Sub-agent"} has a question`,
-          message: `Answer it under the conversation, or click ${info.agent ?? "its row"} under Agents.`,
+        notify({
+          key: `question:${event.data.form.sessionID}`,
+          tone: "warning",
+          glyph: "◆",
+          text: `${info.agent ?? "sub-agent"} has a question`,
+          detail: `Answer it under the conversation, or click ${info.agent ?? "its row"} under Agents.`,
           sessionID: event.data.form.sessionID,
         })
       }),

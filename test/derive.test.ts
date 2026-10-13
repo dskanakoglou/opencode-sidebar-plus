@@ -34,6 +34,8 @@ import {
   teamSummary,
   throttle,
   waitingBanner,
+  addAlert,
+  liveAlerts,
   busySpans,
   callStats,
   laneBar,
@@ -643,4 +645,26 @@ test("per-agent table: no cost column when nothing cost anything", () => {
   const free: AgentStat[] = [{ name: "build", depth: 0, state: "done", time: 1000, tokens: 100, cost: 0, tools: 1, failed: 0, commands: 0 }]
   assert.ok(!statLines(free, 60)[0].includes("cost"))
   assert.ok(statLines([{ ...free[0], cost: 0.5 }], 60)[0].includes("cost"))
+})
+
+test("alerts: same key merges into one line with a count; old ones expire", () => {
+  const finished = (name: string) => ({ key: "finished:root", tone: "success" as const, glyph: "✓", text: `${name} finished`, merged: (n: number) => `${n} agents finished` })
+  let list = addAlert([], finished("aligner"), 1, 0)
+  list = addAlert(list, { key: "context:root", tone: "warning", glyph: "⚠", text: "context 72% full" }, 2, 1000)
+  list = addAlert(list, finished("qc"), 3, 2000)
+  assert.deepEqual(list.map((a) => [a.id, a.text, a.count]), [[1, "2 agents finished", 2], [2, "context 72% full", 1]])
+  assert.equal(list[0].at, 2000, "a merged alert moves to the top and restarts its clock")
+  // success lines last a minute, warnings two
+  assert.deepEqual(liveAlerts(list, 62_500, 3).map((a) => a.id), [2])
+  assert.deepEqual(liveAlerts(list, 122_000, 3), [])
+  assert.equal(liveAlerts(list, 0, 1).length, 1)
+  // without a merge text, the newest text wins
+  const again = addAlert(list, { key: "context:root", tone: "warning", glyph: "⚠", text: "context 91% full" }, 4, 3000)
+  assert.equal(again[0].text, "context 91% full")
+  assert.equal(again[0].count, 2)
+})
+
+test("loop warning: a fan-out of alike delegations is not a loop", () => {
+  const delegate = (id: string) => ({ id, name: "subagent", label: "general: say hello", status: "completed", started: 0, input: {}, nested: [] }) as ToolCall
+  assert.equal(detectLoop([delegate("a"), delegate("b"), delegate("c"), delegate("d"), delegate("e")], 3), undefined)
 })

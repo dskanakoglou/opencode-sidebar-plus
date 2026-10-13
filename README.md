@@ -181,10 +181,17 @@ session folder, or a path you type.
 ## Alerts
 
 OpenCode already notifies when a session finishes or fails, plays its own
-sounds for sub-agents, and toasts a failed sub-agent. The plugin adds toasts for
-what is not covered:
+sounds for sub-agents, and toasts a failed sub-agent. The plugin adds alerts for
+what is not covered. They appear in a strip at the top of the sidebar, newest
+first, at most three, one line each, instead of pop-ups over it: a click opens
+the session an alert is about, `×` dismisses it, and lines fade after a minute
+(warnings and errors after two). Repeats merge into one line, so five sub-agents
+finishing read `✓ 5 agents finished`. While the sidebar is hidden, or with
+"Alerts in sidebar" switched off under ⚙ Options, they pop up instead, one at a
+time and merged the same way. OpenCode's own pop-ups are outside the plugin's
+reach.
 
-- a sub-agent **needs approval** or **has a question** (at most one toast per
+- a sub-agent **needs approval** or **has a question** (at most one alert per
   agent per 30 seconds; the banner stays up for as long as anything waits),
 - a sub-agent finished or was interrupted,
 - a command ran longer than `shellNotifyAfter` seconds and finished (also a
@@ -192,7 +199,7 @@ what is not covered:
 - context crossed `warnAt` or `dangerAt`,
 - the agent looks stuck in a loop, or input looks truncated.
 
-Sub-agent toasts make no sound of their own, so nothing pings twice. The context,
+Sub-agent alerts make no sound of their own, so nothing pings twice. The context,
 loop and truncation alerts fire once per session, while it runs.
 
 "Sidebar sound" under ⚙ Options mutes the plugin's own command-alert sound; it

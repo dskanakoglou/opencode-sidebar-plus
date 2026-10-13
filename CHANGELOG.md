@@ -25,12 +25,19 @@
   footer (click to bring it back), and a waiting sub-agent named above the
   prompt. A line on the start screen says the sidebar appears after the first
   message. Switch: `hints`.
+- **Alerts in the sidebar**: a strip at the top, newest first, at most three
+  lines, instead of pop-ups over the sidebar. Click opens the session, `×`
+  dismisses, lines fade after a minute (warnings and errors after two), repeats
+  merge (`✓ 5 agents finished`). While the sidebar is hidden, or with "Alerts in
+  sidebar" off under ⚙ Options, they pop up one at a time, merged the same way.
 - **Pointer shapes** (OSC 22): an arrow over OpenCode and a hand over anything
   clickable in the sidebar, with iTerm2's X11 names and CSS names elsewhere.
 - Terminal commands shows, in any preset, once you start a background command.
 
 ### Changed
 
+- The loop warning no longer fires on a fan-out of alike delegations to
+  parallel sub-agents.
 - `/sidebar` opens the Options menu. `/details` and `/sidebar-sound` are gone
   (the button, the menu and the command palette cover them), and so is
   `/sidebar-notify-test`.

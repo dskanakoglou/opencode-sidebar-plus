@@ -19,6 +19,7 @@ import {
   formatDuration,
   formatTokens,
   isActive,
+  liveAlerts,
   relativePath,
   commands,
   sparkline,
@@ -34,6 +35,8 @@ import {
   truncate,
   turns,
   waitingBanner,
+  type Alert,
+  type AlertInput,
   type AgentLive,
   type AgentSession,
   type AgentStat,
@@ -89,6 +92,11 @@ export type Shared = {
   }
   /** Whether run reports can be saved (Options › Run reports). Reactive. */
   reports: () => boolean
+  /** Shows an alert: in the sidebar's Alerts strip, or as a pop-up while the sidebar is hidden. */
+  notify: (alert: AlertInput) => void
+  /** The alerts kept for the strip, newest first. Reactive. */
+  alerts: () => Alert[]
+  dismiss: (id: number) => void
 }
 
 export type SessionView = {
@@ -245,18 +253,22 @@ export function ContextSection(props: { shared: Shared; sessionID: string }) {
     if (!u || !s.running()) return
     const id = props.sessionID
     if (on("alerts.context") && u.level !== "ok" && props.shared.once(`${id}:context:${u.level}`))
-      ctx.ui.toast.show({
+      props.shared.notify({
+        key: `context:${id}`,
         sessionID: id,
-        variant: u.level === "danger" ? "error" : "warning",
-        title: `Context ${u.percent}% full`,
-        message: `${formatTokens(u.free ?? 0)} tokens left. Compact or start a fresh session soon.`,
+        tone: u.level === "danger" ? "error" : "warning",
+        glyph: "⚠",
+        text: `context ${u.percent}% full`,
+        detail: `${formatTokens(u.free ?? 0)} tokens left. Compact or start a fresh session soon.`,
       })
     if (on("alerts.truncation") && u.truncated && props.shared.once(`${id}:truncated`))
-      ctx.ui.toast.show({
+      props.shared.notify({
+        key: `truncated:${id}`,
         sessionID: id,
-        variant: "warning",
-        title: "Input looks truncated",
-        message: `Every recent step sent exactly ${u.truncated} input tokens. The provider's window may be smaller than configured (Ollama num_ctx).`,
+        tone: "warning",
+        glyph: "⚠",
+        text: "input looks truncated",
+        detail: `Every recent step sent exactly ${u.truncated} input tokens. The provider's window may be smaller than configured (Ollama num_ctx).`,
       })
   })
   const summary = () => {
@@ -348,11 +360,13 @@ export function ActivitySection(props: { shared: Shared; sessionID: string }) {
     const loop = act().loop
     if (!loop || !on("alerts.loop") || !s.running()) return
     if (props.shared.once(`${props.sessionID}:loop:${loop.name}:${loop.label}`))
-      ctx.ui.toast.show({
+      props.shared.notify({
+        key: `loop:${props.sessionID}`,
         sessionID: props.sessionID,
-        variant: "warning",
-        title: "Agent may be looping",
-        message: `${loop.name} ${loop.label} called ${loop.count}× in a row. Consider interrupting (esc).`,
+        tone: "warning",
+        glyph: "⚠",
+        text: `looping? ${loop.name} ${loop.label}`,
+        detail: `${loop.name} ${loop.label} called ${loop.count}× in a row. Consider interrupting (esc).`,
       })
   })
 
@@ -579,6 +593,43 @@ export function SubagentsSection(props: { shared: Shared; sessionID: string }) {
           <Line fg={theme.text.muted}>{`+${agents().hidden} more finished`}</Line>
         </Show>
       </Section>
+    </Show>
+  )
+}
+
+const ALERT_COLOR = { info: "info", success: "success", warning: "warning", error: "error" } as const
+
+/**
+ * The newest alerts at the top of the sidebar, one line each, instead of pop-ups
+ * over it: a click opens the session it is about, × dismisses it. Lines fade
+ * after a minute (warnings and errors after two).
+ */
+export function AlertsStrip(props: { shared: Shared }) {
+  const { ctx } = props.shared
+  const theme = ctx.theme
+  const now = useNow(() => props.shared.alerts().length > 0)
+  const shown = createMemo(() => liveAlerts(props.shared.alerts(), now(), 3))
+  return (
+    <Show when={shown().length > 0}>
+      <box>
+        <For each={shown()}>
+          {(alert) => {
+            const ago = () => formatDuration(now() - alert.at)
+            const open = alert.sessionID ? () => (props.shared.dismiss(alert.id), openSession(ctx, alert.sessionID!)) : undefined
+            return (
+              <box flexDirection="row" justifyContent="space-between">
+                <Clickable shared={props.shared} flexDirection="row" onClick={open}>
+                  <text fg={theme.text.feedback[ALERT_COLOR[alert.tone]].base}>{`${alert.glyph} ${truncate(alert.text, WIDTH - ago().length - 6)}`}</text>
+                  <text fg={theme.text.muted}>{` ${ago()}`}</text>
+                </Clickable>
+                <Clickable shared={props.shared} onClick={() => props.shared.dismiss(alert.id)}>
+                  <text fg={theme.text.muted}>{"×"}</text>
+                </Clickable>
+              </box>
+            )
+          }}
+        </For>
+      </box>
     </Show>
   )
 }
