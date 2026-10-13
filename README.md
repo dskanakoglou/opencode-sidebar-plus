@@ -83,21 +83,8 @@ to bring it up; it keeps its fixed 42-column width.
 The Agents section is a live view of a multi-agent run: every sub-agent
 delegated from the conversation, and the sub-agents *they* delegated to, as an
 indented tree. It appears at the top of the sidebar as soon as the first
-sub-agent starts, and stays hidden in conversations without any.
-
-```text
-▼ Agents ✓ 1/4 · ● 1 · ◆ 1 · ✗ 1
-◆ asker needs input
-  answer below, or click to open
-  ◆ asker                        57s
-    big-pickle · needs input
-  ● caller                       57s
-    big-pickle · shell sleep 2
-  ✓ aligner                      16s
-    big-pickle · 17.1k
-  ✗ failer                        0s
-    no-such-model… · failed
-```
+sub-agent starts, and stays hidden in conversations without any. The screenshot
+above shows it mid-run.
 
 **Header.** How the team is doing: `3/5 done · 1 running · 1 waiting · $0.02`,
 in the theme's colours per state. When that does not fit, the same counts as
