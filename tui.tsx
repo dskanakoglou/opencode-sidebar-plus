@@ -10,6 +10,7 @@ import {
   readOptions,
   resolveFeatures,
   sectionOrder,
+  throttle,
   truncate,
   type FeatureID,
   type PresetID,
@@ -142,25 +143,28 @@ const plugin: Plugin.Definition = {
       return chooseFeatures(picked)
     }
 
-    // Toasts for sub-agents. OpenCode itself already plays its "subagent_done" /
-    // "error" / "permission" sounds for child sessions (opencode.notifications), but
-    // shows no toast for them and no desktop notification, so a child waiting on an
-    // approval is easy to miss. No extra sound here, so nothing pings twice.
+    // Toasts for sub-agents. OpenCode itself plays its "subagent_done" / "error" /
+    // "permission" sounds for child sessions and toasts failures, but shows no toast
+    // when a child finishes or waits on an approval or a question, so those are easy
+    // to miss. No extra sound here, so nothing pings twice.
     const runs = new Map<string, number>()
+    const askedRecently = throttle(30_000)
     const child = (sessionID: string) => {
       const info = ctx.data.session.get(sessionID)
       return info?.parentID ? info : undefined
     }
-    const agentFinished = (sessionID: string, outcome: "succeeded" | "failed" | "interrupted", error?: string) => {
+    // Failures are left out: OpenCode itself toasts "Session failed" with the error
+    // for every session, sub-agents included.
+    const agentFinished = (sessionID: string, outcome: "succeeded" | "interrupted") => {
       const info = child(sessionID)
       const began = runs.get(sessionID)
       runs.delete(sessionID)
       if (!info || !on("alerts.agents")) return
       const name = info.agent ?? "Sub-agent"
       const took = began ? ` · ${formatDuration(Date.now() - began)}` : ""
-      const variant = outcome === "succeeded" ? "success" : outcome === "failed" ? "error" : "warning"
-      const verb = outcome === "succeeded" ? "finished" : outcome === "failed" ? "failed" : "was interrupted"
-      ctx.ui.toast.show({ variant, title: `${name} ${verb}`, message: `${truncate(error ?? info.title ?? "", 80)}${took}`, sessionID })
+      const variant = outcome === "succeeded" ? "success" : "warning"
+      const verb = outcome === "succeeded" ? "finished" : "was interrupted"
+      ctx.ui.toast.show({ variant, title: `${name} ${verb}`, message: `${truncate(info.title ?? "", 80)}${took}`, sessionID })
     }
 
     const cleanups = [
@@ -282,16 +286,29 @@ const plugin: Plugin.Definition = {
       ctx.data.on("session.execution.started", (event) => void runs.set(event.data.sessionID, event.created)),
       ctx.data.on("session.execution.succeeded", (event) => agentFinished(event.data.sessionID, "succeeded")),
       ctx.data.on("session.execution.interrupted", (event) => agentFinished(event.data.sessionID, "interrupted")),
-      ctx.data.on("session.execution.failed", (event) => agentFinished(event.data.sessionID, "failed", event.data.error.message)),
+      ctx.data.on("session.execution.failed", (event) => void runs.delete(event.data.sessionID)),
+      // One toast per sub-agent per half minute: an agent working through several
+      // shell calls asks again and again, and the stacked toasts would cover the
+      // Agents banner, which stays up for as long as anything waits.
       ctx.data.on("permission.asked", (event) => {
         const info = child(event.data.sessionID)
-        if (!info || !on("alerts.agents")) return
+        if (!info || !on("alerts.agents") || !askedRecently.fresh(event.data.sessionID, event.created)) return
         const what = [event.data.action, ...event.data.resources.slice(0, 1)].join(" ")
         ctx.ui.toast.show({
           variant: "warning",
           title: `${info.agent ?? "Sub-agent"} needs approval`,
           message: `${truncate(what, 60)}. Answer the permission prompt, or click ${info.agent ?? "its row"} under Agents.`,
           sessionID: event.data.sessionID,
+        })
+      }),
+      ctx.data.on("form.created", (event) => {
+        const info = child(event.data.form.sessionID)
+        if (!info || !on("alerts.agents") || !askedRecently.fresh(event.data.form.sessionID, event.created)) return
+        ctx.ui.toast.show({
+          variant: "warning",
+          title: `${info.agent ?? "Sub-agent"} has a question`,
+          message: `Answer it under the conversation, or click ${info.agent ?? "its row"} under Agents.`,
+          sessionID: event.data.form.sessionID,
         })
       }),
       ctx.data.on("shell.created", (event) => {

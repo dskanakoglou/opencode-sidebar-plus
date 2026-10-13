@@ -7,6 +7,7 @@ import {
   activity,
   agentLines,
   bar,
+  breakdownText,
   callText,
   DELEGATE_TOOL,
   deriveAgents,
@@ -23,22 +24,26 @@ import {
   todoList,
   todoSummary,
   toolCalls,
+  teamSummary,
   truncate,
   turns,
+  waitingBanner,
   type AgentLive,
   type AgentSession,
-  type AgentState,
   type FeatureID,
   type Options,
+  type Segment,
+  type Tone,
   type ToolCall,
 } from "./derive.ts"
 
 type Context = Plugin.Context
 
 export const PANEL = "sidebar-plus.details"
-// The host sidebar is a fixed 42 columns (OpenCode 2.0.16) minus its own padding;
-// the slot API does not pass its width to plugins.
-const WIDTH = 32
+// The host sidebar is a fixed 42 columns (OpenCode 2.0.16 to 2.0.28): 38 for a
+// section, 36 inside one. The slot API does not pass its width to plugins, so
+// lines are cut a little short of that.
+const WIDTH = 34
 const BAR = 20
 
 // The primary base is ordinary foreground in migrated themes (often white).
@@ -130,7 +135,18 @@ function useNow(active: () => boolean) {
   return now
 }
 
-function Section(props: { shared: Shared; id: string; title: string; summary?: string; summaryFg?: RGBA; children: JSX.Element }) {
+function Section(props: {
+  shared: Shared
+  id: string
+  title: string
+  summary?: string
+  summaryFg?: RGBA
+  /** A summary in several colours, instead of `summary`. */
+  segments?: { text: string; fg: RGBA }[]
+  /** Shown under the header even while the section is collapsed. */
+  banner?: JSX.Element
+  children: JSX.Element
+}) {
   const theme = props.shared.ctx.theme
   const collapsed = () => props.shared.collapsed[props.id] === true
   return (
@@ -143,7 +159,13 @@ function Section(props: { shared: Shared; id: string; title: string; summary?: s
         <Show when={props.summary}>
           <text fg={props.summaryFg ?? theme.text.muted}>{props.summary}</text>
         </Show>
+        <Show when={props.segments?.length}>
+          <box flexDirection="row">
+            <Index each={props.segments}>{(segment) => <text fg={segment().fg}>{segment().text}</text>}</Index>
+          </box>
+        </Show>
       </box>
+      {props.banner}
       <Show when={!collapsed()}>
         <box paddingLeft={2}>{props.children}</box>
       </Show>
@@ -209,9 +231,7 @@ export function ContextSection(props: { shared: Shared; sessionID: string }) {
               </Line>
               </Show>
               <Show when={on("context.breakdown")}>
-              <Line fg={theme.text.muted}>
-                {`in ${formatTokens(u().breakdown.input)} · out ${formatTokens(u().breakdown.output)}${u().breakdown.reasoning ? ` · think ${formatTokens(u().breakdown.reasoning)}` : ""}${u().breakdown.cache ? ` · cache ${formatTokens(u().breakdown.cache)}` : ""}`}
-              </Line>
+              <Line fg={theme.text.muted}>{breakdownText(u().breakdown, WIDTH)}</Line>
               </Show>
               <Show when={on("context.sparkline") && history().length > 1}>
                 <Line fg={theme.text.muted}>{`history ${history()}`}</Line>
@@ -366,7 +386,7 @@ export function FilesSection(props: { shared: Shared; sessionID: string }) {
   )
 }
 
-function agentColor(ctx: Context, state: AgentState): RGBA {
+function agentColor(ctx: Context, state: Tone): RGBA {
   const t = ctx.theme.text
   switch (state) {
     case "running":
@@ -409,6 +429,13 @@ export function SubagentsSection(props: { shared: Shared; sessionID: string }) {
     const { rootID, sessions } = family()
     return [...new Set(sessions.filter((s) => s.id !== rootID && s.parentID).map((s) => s.id))]
   })
+  // child id -> status of the delegation call that started it, from every parent's calls
+  const delegations = createMemo(() => {
+    const out: Record<string, ToolCall["status"]> = {}
+    const parents = new Set([family().rootID, ...family().sessions.flatMap((s) => (s.parentID ? [s.parentID] : []))])
+    for (const id of parents) for (const call of props.shared.session(id).calls()) if (call.child) out[call.child] = call.status
+    return out
+  })
   const live = createMemo(() => {
     const out: Record<string, AgentLive> = {}
     for (const id of descendants()) {
@@ -417,6 +444,7 @@ export function SubagentsSection(props: { shared: Shared; sessionID: string }) {
         status,
         approvals: data.session.permission.list(id)?.length ?? 0,
         questions: data.session.form.list(id)?.length ?? 0,
+        call: delegations()[id],
       }
       if (status === "running") {
         const current = props.shared.session(id).calls().findLast((c) => c.status === "running" || c.status === "streaming")
@@ -440,26 +468,39 @@ export function SubagentsSection(props: { shared: Shared; sessionID: string }) {
   const agents = createMemo(() =>
     deriveAgents({ rootID: family().rootID, sessions: family().sessions as AgentSession[], live: live(), now: now(), finishedLimit: options.agentsShown }),
   )
-  // while any run: what is in flight; afterwards: how it went
-  const summary = () => {
-    const a = agents()
-    if (a.running || a.waiting) return [a.running ? `${a.running} running` : "", a.waiting ? `${a.waiting} waiting` : ""].filter(Boolean).join(" · ")
-    return [`${a.done}/${a.total} done`, a.failed ? `${a.failed} failed` : "", a.interrupted ? `${a.interrupted} stopped` : ""].filter(Boolean).join(" · ")
-  }
-  const summaryFg = () => {
-    const a = agents()
-    return a.waiting ? theme.text.feedback.warning.base : !a.running && a.failed ? theme.text.feedback.error.base : accent(ctx)
-  }
+  // "3/5 done · 1 running · 1 waiting · $0.02", in the columns left after "▼ Agents "
+  const segments = createMemo(() =>
+    teamSummary(agents(), data.session.cost(family().rootID), WIDTH + 2 - "▼ Agents ".length).map((s: Segment) => ({ text: s.text, fg: agentColor(ctx, s.tone) })),
+  )
+  const banner = createMemo(() => (props.shared.on("subagents.banner") ? waitingBanner(agents().rows, WIDTH + 2) : undefined))
+  const open = (sessionID: string) => ctx.ui.router.navigate({ type: "session", sessionID })
 
   return (
     <Show when={agents().total > 0}>
-      <Section shared={props.shared} id="subagents" title="Agents" summary={summary()} summaryFg={summaryFg()}>
+      <Section
+        shared={props.shared}
+        id="subagents"
+        title="Agents"
+        segments={segments()}
+        banner={
+          <Show when={banner()}>
+            {(b) => (
+              <box onMouseUp={() => open(b().target)}>
+                <text fg={theme.text.feedback.warning.base}>
+                  <b>{b().title}</b>
+                </text>
+                <text fg={theme.text.feedback.warning.base}>{b().hint}</text>
+              </box>
+            )}
+          </Show>
+        }
+      >
         <Index each={agents().rows}>
           {(row) => {
             const lines = () => agentLines(row(), WIDTH)
             const detailFg = () => (row().state === "waiting" ? theme.text.feedback.warning.base : row().state === "failed" ? theme.text.feedback.error.base : theme.text.muted)
             return (
-              <box onMouseUp={() => ctx.ui.router.navigate({ type: "session", sessionID: row().id })}>
+              <box onMouseUp={() => open(row().id)}>
                 <box flexDirection="row">
                   <text fg={agentColor(ctx, row().state)}>{lines().glyph}</text>
                   <text fg={row().id === props.sessionID ? accent(ctx) : theme.text.base}>{lines().rest}</text>

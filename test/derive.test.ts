@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs"
 import {
   activity,
   bar,
+  breakdownText,
   contextHistory,
   sparkline,
   contextUsage,
@@ -30,6 +31,10 @@ import {
   matchPreset,
   presetFeatures,
   sectionOrder,
+  teamSummary,
+  throttle,
+  waitingBanner,
+  type AgentRow,
   type AgentSession,
   type ToolCall,
 } from "../src/derive.ts"
@@ -348,6 +353,10 @@ test("agents: status mapping from status, pending requests and SessionInfo.outco
   assert.deepEqual(agentState(s("succeeded", 5), undefined), { state: "done" })
   assert.deepEqual(agentState(s(undefined, 5), undefined), { state: "done" })
   assert.deepEqual(agentState(s(), undefined), { state: "idle" })
+  // no outcome, but the parent's delegation call ended (a dismissed question, OpenCode 2.0.28)
+  assert.deepEqual(agentState(s(), { status: "idle", call: "error" }), { state: "interrupted" })
+  assert.deepEqual(agentState(s(), { status: "idle", call: "completed" }), { state: "done" })
+  assert.deepEqual(agentState(s(), { status: "running", call: "running" }), { state: "running" })
   const out = deriveAgents({ rootID: "root", sessions: [{ ...session("f", "root", { idle: 9 }), outcome: "failed" }, { ...session("i", "root", { idle: 8 }), outcome: "interrupted" }], live: {}, now: 10 })
   assert.equal(out.failed, 1)
   assert.equal(out.interrupted, 1)
@@ -454,4 +463,84 @@ test("tool calls carry the shell exit code; commands use it", () => {
   const msgs = [user("u", 1), assistant("a", 2, { content: [completed] })] as any
   assert.equal(toolCalls(msgs)[0].exit, 2)
   assert.equal(commands(msgs, [], [], 5, toolCalls(msgs))[0].status, "exit 2")
+})
+
+test("agents: a running agent without tokens yet says 'starting…', then 'thinking'", () => {
+  const [row] = deriveAgents({ rootID: "root", sessions: [session("a", "root", { created: 0 })], live: { a: { status: "running" } }, now: 3000 }).rows
+  assert.equal(agentLines({ ...row, tokens: 0 }, 32).detail, "  big-pickle · starting…")
+  assert.equal(agentLines(row, 32).detail, "  big-pickle · thinking · 17.9k")
+  // a tool in flight says more than "starting…"
+  assert.equal(agentLines({ ...row, tokens: 0, tool: { name: "shell", label: "ls" } }, 32).detail, "  big-pickle · shell ls")
+})
+
+const counts = (extra: Partial<Record<"total" | "running" | "waiting" | "done" | "failed" | "interrupted", number>>) => ({
+  total: 5, running: 0, waiting: 0, done: 0, failed: 0, interrupted: 0, ...extra,
+})
+const flat = (segments: { text: string }[]) => segments.map((s) => s.text).join("")
+
+test("team summary: words when they fit, glyphs when not; zero counts dropped", () => {
+  assert.equal(flat(teamSummary(counts({ done: 3, running: 1, waiting: 1 }), 0.02, 60)), "3/5 done · 1 running · 1 waiting · $0.02")
+  assert.equal(flat(teamSummary(counts({ done: 3, running: 1, waiting: 1 }), 0.02, 25)), "✓ 3/5 · ● 1 · ◆ 1 · $0.02")
+  assert.equal(flat(teamSummary(counts({ done: 3, running: 1, waiting: 1, failed: 1, total: 6 }), 0.02, 25)), "✓ 3/6 ● 1 ◆ 1 ✗ 1 $0.02")
+  assert.equal(flat(teamSummary(counts({ running: 5 }), 0, 25)), "0/5 done · 5 running")
+  assert.equal(flat(teamSummary(counts({ done: 4, failed: 1 }), 0, 25)), "4/5 done · 1 failed")
+  assert.equal(flat(teamSummary(counts({ done: 4, interrupted: 1 }), 0, 25)), "4/5 done · 1 stopped")
+  assert.deepEqual(teamSummary(counts({ total: 0 }), 0, 25), [])
+  assert.equal(flat(teamSummary(counts({ done: 5 }), 0.001, 60)), "5/5 done · <$0.01")
+  // every form fits the Agents header at the plugin's width, for a 5-agent swarm
+  for (const c of [counts({ done: 1, running: 2, waiting: 2 }), counts({ done: 2, running: 1, waiting: 1, failed: 1 })])
+    assert.ok(flat(teamSummary(c, 1.23, 25)).length <= 25, flat(teamSummary(c, 1.23, 25)))
+  // colours: waiting stands out; done is calm until all are done
+  const tones = Object.fromEntries(teamSummary(counts({ done: 3, waiting: 2 }), 0, 60).map((s) => [s.text, s.tone]))
+  assert.equal(tones["2 waiting"], "waiting")
+  assert.equal(tones["3/5 done"], "muted")
+  assert.equal(teamSummary(counts({ done: 5 }), 0, 60)[0].tone, "done")
+})
+
+test("waiting banner: names the agent, points at the longest-waiting one", () => {
+  const row = (id: string, started: number, state: AgentRow["state"], waitingFor?: AgentRow["waitingFor"]): AgentRow => ({
+    id, depth: 1, agent: id, state, waitingFor, started, elapsed: 0, tokens: 0, cost: 0,
+  })
+  assert.equal(waitingBanner([row("a", 1, "running")], 34), undefined)
+  const one = waitingBanner([row("a", 1, "running"), row("variant-caller", 2, "waiting", "approval")], 34)!
+  assert.deepEqual(one, { title: "◆ variant-caller needs approval", hint: "  answer below, or click to open", target: "variant-caller" })
+  assert.equal(waitingBanner([row("q", 2, "waiting", "input")], 34)!.title, "◆ q needs input")
+  const many = waitingBanner([row("late", 9, "waiting", "approval"), row("early", 3, "waiting", "input"), row("x", 1, "done")], 34)!
+  assert.equal(many.title, "◆ 2 agents wait for you")
+  assert.equal(many.target, "early")
+  // long names are cut, the words that matter are not
+  const long = waitingBanner([row("a-very-long-specialist-agent-name", 1, "waiting", "approval")], 34)!
+  assert.ok(long.title.length <= 34 && long.title.endsWith("needs approval"), long.title)
+  assert.ok(one.hint.length <= 34)
+})
+
+test("v0.1 saved switches keep their 'everything on' base; v0.2 state does not", () => {
+  const defaults = readOptions({}).features
+  // v0.1 stored { overrides } with no preset key
+  assert.equal(resolveFeatures(defaults, { activity: false }, undefined).files, true)
+  assert.equal(resolveFeatures(defaults, { activity: false }, undefined).activity, false)
+  // no overrides: nothing to preserve, the default preset applies
+  assert.equal(resolveFeatures(defaults, {}, undefined).files, false)
+  // v0.2 state: "" means "config defaults"
+  assert.equal(resolveFeatures(defaults, { activity: false }, "").files, false)
+  // new switches are on in the Agents and Full presets, off in Minimal
+  assert.equal(presetFeatures("agents")["subagents.banner"], true)
+  assert.equal(presetFeatures("minimal")["subagents.banner"], false)
+})
+
+test("approval toasts: at most one per sub-agent per window", () => {
+  const t = throttle(30_000)
+  assert.equal(t.fresh("a", 0), true)
+  assert.equal(t.fresh("a", 5_000), false)
+  assert.equal(t.fresh("b", 5_000), true)
+  assert.equal(t.fresh("a", 30_000), true)
+  assert.equal(t.fresh("a", 31_000), false)
+})
+
+test("token breakdown drops separators before it would wrap", () => {
+  const b = { input: 1500, output: 42, reasoning: 90, cache: 7700 }
+  assert.equal(breakdownText(b, 60), "in 1.5k · out 42 · think 90 · cache 7.7k")
+  assert.equal(breakdownText(b, 34), "in 1.5k out 42 think 90 cache 7.7k")
+  assert.equal(breakdownText({ ...b, reasoning: 0, cache: 0 }, 34), "in 1.5k · out 42")
+  assert.ok(breakdownText({ input: 150_000, output: 12_345, reasoning: 99_999, cache: 120_000 }, 34).length <= 34)
 })

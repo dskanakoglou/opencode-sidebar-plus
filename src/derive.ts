@@ -34,6 +34,7 @@ export const FEATURES = [
   { id: "activity.errors", group: "Activity", title: "Errors and retries", description: "Last error and provider retries" },
   { id: "files.branch", group: "Files", title: "Git branch", description: "Current branch next to the file count" },
   { id: "subagents.top", group: "Agents", title: "Move to top", description: "Show Agents first while there are sub-agents" },
+  { id: "subagents.banner", group: "Agents", title: "Waiting banner", description: "A highlighted line at the top of Agents while a sub-agent waits for you; click opens it" },
   { id: "alerts.context", group: "Alerts", title: "Context threshold toast", description: "When usage crosses warnAt / dangerAt" },
   { id: "alerts.loop", group: "Alerts", title: "Loop toast", description: "When the agent seems stuck" },
   { id: "alerts.truncation", group: "Alerts", title: "Truncation toast", description: "When input looks truncated" },
@@ -59,7 +60,7 @@ export const DEFAULT_PRESET: PresetID = "agents"
 
 const PRESET_ON: Record<PresetID, readonly FeatureID[] | "all"> = {
   minimal: ["context", "context.bar", "todo", "todo.done"],
-  agents: ["context", "context.bar", "todo", "todo.done", "subagents", "subagents.top", "activity", "activity.tools", "activity.loop", "activity.errors"],
+  agents: ["context", "context.bar", "todo", "todo.done", "subagents", "subagents.top", "subagents.banner", "activity", "activity.tools", "activity.loop", "activity.errors"],
   full: "all",
 }
 
@@ -137,10 +138,17 @@ function pickFeatures(raw: unknown): Partial<Features> {
   return Object.fromEntries(Object.entries(raw).filter(([id, on]) => FEATURE_IDS.has(id) && typeof on === "boolean")) as Partial<Features>
 }
 
-/** Config defaults, or a preset picked at runtime, with runtime toggles on top. */
+/**
+ * Config defaults, or a preset picked at runtime, with runtime toggles on top.
+ * `preset` is undefined only in state saved by v0.1, which had no presets: its
+ * switches were flipped against "everything on", so that stays their base.
+ */
 export function resolveFeatures(defaults: Features, runtime: Readonly<Record<string, unknown>> | undefined, preset?: unknown): Features {
-  const base = typeof preset === "string" && PRESET_IDS.has(preset) ? presetFeatures(preset as PresetID) : defaults
-  return { ...base, ...pickFeatures(runtime) }
+  const picked = pickFeatures(runtime)
+  const legacy = preset === undefined && Object.keys(picked).length > 0
+  const id = legacy ? "full" : preset
+  const base = typeof id === "string" && PRESET_IDS.has(id) ? presetFeatures(id as PresetID) : defaults
+  return { ...base, ...picked }
 }
 
 /** Section order: the configured order, with Agents first while there are sub-agents. */
@@ -515,6 +523,15 @@ export function turns(messages: readonly Message[]): Turn[] {
   return result
 }
 
+/** "in 1.5k · out 42 · think 90 · cache 7.7k", tighter when it would wrap. */
+export function breakdownText(b: ContextUsage["breakdown"], width: number): string {
+  const parts = [`in ${formatTokens(b.input)}`, `out ${formatTokens(b.output)}`]
+  if (b.reasoning) parts.push(`think ${formatTokens(b.reasoning)}`)
+  if (b.cache) parts.push(`cache ${formatTokens(b.cache)}`)
+  const roomy = parts.join(" · ")
+  return roomy.length <= width ? roomy : truncate(parts.join(" "), width)
+}
+
 export function formatTokens(value: number): string {
   if (value < 1000) return String(Math.round(value))
   if (value < 100_000) return `${(value / 1000).toFixed(1).replace(/\.0$/, "")}k`
@@ -575,6 +592,8 @@ export type AgentLive = {
   questions?: number
   /** The tool call in flight, for running sessions. */
   tool?: Pick<ToolCall, "name" | "label">
+  /** How the parent's delegation call that started this agent stands. */
+  call?: ToolCall["status"]
 }
 
 export type AgentState = "running" | "waiting" | "done" | "failed" | "interrupted" | "idle"
@@ -619,6 +638,9 @@ export function agentState(session: AgentSession, live: AgentLive | undefined): 
   if (session.outcome === "failed") return { state: "failed" }
   if (session.outcome === "interrupted") return { state: "interrupted" }
   if (session.outcome === "succeeded" || session.time.idle !== undefined) return { state: "done" }
+  // No outcome recorded, e.g. its question was dismissed: the parent's call tells.
+  if (live?.call === "error") return { state: "interrupted" }
+  if (live?.call === "completed") return { state: "done" }
   return { state: "idle" }
 }
 
@@ -734,7 +756,8 @@ export function agentLines(row: AgentRow, width: number): { head: string; glyph:
   const rest = ` ${name}${" ".repeat(pad)}${time}`
   const what =
     row.state === "waiting" ? (row.waitingFor === "approval" ? "needs approval" : "needs input")
-    : row.state === "running" ? (row.tool ? callText(row.tool) : "thinking")
+    // tokens arrive when a step ends; until the first one has, say so
+    : row.state === "running" ? (row.tool ? callText(row.tool) : row.tokens > 0 ? "thinking" : "starting…")
     : row.state === "failed" ? "failed"
     : row.state === "interrupted" ? "interrupted"
     : ""
@@ -749,4 +772,71 @@ export function agentLines(row: AgentRow, width: number): { head: string; glyph:
   const parts = what && room >= 6 ? [truncate(what, room), tail] : [tail]
   const detail = `${lead}${parts.filter(Boolean).join(" · ")}`.trimEnd().replace(/ ·$/, "")
   return { head: glyph + rest, glyph, rest, detail }
+}
+
+/** Colour roles for the header summary; the view maps them to theme colours. */
+export type Tone = AgentState | "muted"
+export type Segment = { text: string; tone: Tone }
+
+/**
+ * The Agents header: "3/5 done · 1 running · 1 waiting · $0.02", or a glyph form
+ * ("✓ 3/5 · ● 1 · ◆ 1 · $0.02") when that does not fit in `width` columns.
+ * Zero counts are left out, except "done", which shows progress.
+ */
+export function teamSummary(a: Pick<Agents, "total" | "running" | "waiting" | "done" | "failed" | "interrupted">, cost: number, width: number): Segment[] {
+  if (a.total === 0) return []
+  const parts: [Tone, number, string, string][] = [
+    ["done", a.done, `${a.done}/${a.total} done`, `${AGENT_GLYPH.done} ${a.done}/${a.total}`],
+    ["running", a.running, `${a.running} running`, `${AGENT_GLYPH.running} ${a.running}`],
+    ["waiting", a.waiting, `${a.waiting} waiting`, `${AGENT_GLYPH.waiting} ${a.waiting}`],
+    ["failed", a.failed, `${a.failed} failed`, `${AGENT_GLYPH.failed} ${a.failed}`],
+    ["interrupted", a.interrupted, `${a.interrupted} stopped`, `${AGENT_GLYPH.interrupted} ${a.interrupted}`],
+  ]
+  const shown = parts.filter(([tone, n]) => n > 0 || tone === "done")
+  // cents are enough up here; the rows carry the exact figures
+  const money = cost <= 0 ? "" : cost < 0.005 ? "<$0.01" : `$${cost.toFixed(2)}`
+  const build = (form: 2 | 3, sep: string): Segment[] => {
+    const out: Segment[] = []
+    for (const part of shown) {
+      if (out.length) out.push({ text: sep, tone: "muted" })
+      // done counts are calm unless everything is done
+      out.push({ text: part[form], tone: part[0] === "done" && a.done < a.total ? "muted" : part[0] })
+    }
+    if (money) out.push({ text: sep, tone: "muted" }, { text: money, tone: "muted" })
+    return out
+  }
+  const length = (segments: Segment[]) => segments.reduce((n, s) => n + s.text.length, 0)
+  const forms = [build(2, " · "), build(3, " · "), build(3, " ")]
+  return forms.find((f) => length(f) <= width) ?? forms.at(-1)!
+}
+
+/**
+ * The banner over the Agents rows while sub-agents wait for the user. OpenCode
+ * shows a sub-agent's permission prompt or question under the main conversation
+ * too, so it can be answered there; a click opens the longest-waiting agent.
+ */
+export function waitingBanner(rows: readonly AgentRow[], width: number): { title: string; hint: string; target: string } | undefined {
+  const waiting = rows.filter((r) => r.state === "waiting").sort((a, b) => a.started - b.started || a.id.localeCompare(b.id))
+  if (!waiting.length) return
+  const [first] = waiting
+  const what = first.waitingFor === "input" ? "input" : "approval"
+  const head = `${AGENT_GLYPH.waiting} `
+  const title =
+    waiting.length === 1
+      ? `${head}${truncate(first.agent, Math.max(4, width - head.length - ` needs ${what}`.length))} needs ${what}`
+      : `${head}${waiting.length} agents wait for you`
+  return { title, hint: "  answer below, or click to open", target: first.id }
+}
+
+/** `fresh(key, at)` is true at most once per `window` ms for each key. */
+export function throttle(window: number) {
+  const last = new Map<string, number>()
+  return {
+    fresh(key: string, at: number): boolean {
+      const before = last.get(key)
+      if (before !== undefined && at - before < window) return false
+      last.set(key, at)
+      return true
+    },
+  }
 }
