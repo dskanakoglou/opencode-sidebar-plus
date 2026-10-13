@@ -164,7 +164,7 @@ The foot of the sidebar holds three buttons, in every preset:
 - **≡ Details** opens the details panel.
 - **⚙ Options** opens the same menu as `/sidebar`: Run a command, Session details
   and Save run report first, so everything stays reachable while the sidebar is
-  hidden; then the presets, Custom…, sidebar sound, run reports, and reset.
+  hidden; then the presets, every switch, sidebar sound, run reports, and reset.
 
 Section headings, agent rows, the waiting banner, delegations under Agent activity
 and finished commands are clickable too. In terminals that support pointer shapes
@@ -214,8 +214,10 @@ palette) and pick a preset. The change applies at once and is remembered.
 | **Agents** (default) | Context bar, task list, Agents with the waiting banner, and Agent activity |
 | **Full** | Everything, including token numbers, sparkline, terminal commands and files |
 
-Alerts and hints stay on in every preset, and the buttons are always there. **Custom…** lists every switch; Enter flips one
-(● on, ○ off). "Reset to config defaults" forgets what was picked in `/sidebar`.
+Alerts and hints stay on in every preset, and the buttons are always there. Below
+the presets the menu lists every switch with its state (`on`/`off`), grouped as in
+the table below; Enter flips one and the menu stays open on it. Type to filter.
+"Reset to config defaults" forgets what was picked in the menu.
 
 | Group | Switches |
 |---|---|

@@ -11,7 +11,9 @@
   The last choice is remembered. Clicking a finished command offers **Run again**
   or **Edit, then run…**; nothing runs on the click itself.
 - **⚙ Options** (also `/sidebar`): Run a command, Session details and Save run
-  report first, then presets, Custom…, sidebar sound, run reports and reset.
+  report first, then the presets and every switch, with states and
+  descriptions in aligned columns (no separate Custom… step), then sound, run
+  reports and reset.
 - **Details panel**: a timeline (one lane per agent on a shared time axis) and a
   per-agent table (model, state, time, tokens, cost, tools, failures, commands,
   totals) above the existing views. The cost column is left out when nothing

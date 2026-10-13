@@ -224,33 +224,32 @@ const plugin: Plugin.Definition = {
         updateReport((draft) => void (draft.enabled = null)),
       ]).catch(() => {})
 
-    // Short descriptions: the dialog cuts them at its width.
-    const PRESET_SHORT: Record<PresetID, string> = { minimal: "context and to-do", agents: "context, to-do, agents, activity", full: "everything" }
-
     // ⚙ Options and /sidebar: the actions first, so everything stays reachable
-    // while the sidebar is hidden; then layout and settings. Settings re-open the
-    // menu, so several can be flipped in one go.
+    // while the sidebar is hidden; then the presets and every switch. Names are
+    // padded so the states and descriptions line up. Picking a switch re-opens the
+    // menu on it, so several can be flipped in one go.
+    const PRESET_SHORT: Record<PresetID, string> = { minimal: "context and to-do", agents: "context, to-do, agents, activity", full: "everything" }
+    const NAME = 24
+    const row = (name: string, state?: string) => `${name.padEnd(NAME)} ${(state ?? "").padEnd(3)}`
+    const onOff = (on: boolean) => (on ? "on" : "off")
     const openOptions = async (current?: string): Promise<void> => {
       const sessionID = currentSession()
       const active = matchPreset(features())
-      const onOff = (on: boolean) => (on ? "on" : "off")
-      const needsSession = sessionID ? "" : " · open a session first"
+      const later = sessionID ? "" : " (open a session)"
       const choice = ctx.ui.dialog.select<string>({
         title: "Sidebar",
         placeholder: "Filter",
         current,
         options: [
-          { title: "▶ Run a command…", value: "run", description: `in chat or in background${needsSession}`, category: "Actions", disabled: !sessionID },
-          { title: "≡ Session details", value: "details", description: `timeline and per-agent totals${needsSession}`, category: "Actions", disabled: !sessionID },
-          ...(reports()
-            ? [{ title: "↓ Save run report…", value: "report", description: `Markdown summary${needsSession}`, category: "Actions", disabled: !sessionID }]
-            : []),
+          { title: row("▶ Run a command…"), value: "run", description: `in chat or in background${later}`, category: "Actions", disabled: !sessionID },
+          { title: row("≡ Session details"), value: "details", description: `timeline, per-agent totals${later}`, category: "Actions", disabled: !sessionID },
+          ...(reports() ? [{ title: row("↓ Save run report…"), value: "report", description: `Markdown summary${later}`, category: "Actions", disabled: !sessionID }] : []),
           // the dialog puts its own dot on `current`, so states are words here
-          ...PRESETS.map((p) => ({ title: `${p.title}${active === p.id ? " · in use" : ""}`, value: `preset:${p.id}`, description: PRESET_SHORT[p.id], category: "Layout" })),
-          { title: `Custom…${active ? "" : " · in use"}`, value: "custom", description: "single switches", category: "Layout" },
-          { title: `Sidebar sound: ${onOff(audio.enabled)}`, value: "sound", description: "this plugin's sound only", category: "Settings" },
-          { title: `Run reports: ${onOff(reports())}`, value: "reports", description: "allow saving reports", category: "Settings" },
-          { title: "Reset to config defaults", value: "reset", description: "forget what was picked here", category: "Settings" },
+          ...PRESETS.map((p) => ({ title: row(p.title, active === p.id ? "✓" : ""), value: `preset:${p.id}`, description: PRESET_SHORT[p.id], category: "Layout" })),
+          ...FEATURES.map((f) => ({ title: row(f.title, onOff(on(f.id))), value: f.id as string, description: f.description, category: f.group })),
+          { title: row("Sidebar sound", onOff(audio.enabled)), value: "sound", description: "this plugin's sound only", category: "Settings" },
+          { title: row("Run reports", onOff(reports())), value: "reports", description: "allow saving reports", category: "Settings" },
+          { title: row("Reset to config defaults"), value: "reset", description: "forget what was picked here", category: "Settings" },
         ],
       })
       ctx.ui.dialog.set({ size: "large" })
@@ -259,35 +258,16 @@ const plugin: Plugin.Definition = {
       if (picked === "run" && sessionID) return runCommand(sessionID)
       if (picked === "details") return void ctx.ui.panel.open(PANEL)
       if (picked === "report" && sessionID) return saveReport(sessionID)
-      if (picked === "custom") return chooseFeatures()
-      if (picked === "reset") return void (await reset())
-      if (picked.startsWith("preset:"))
-        return void (await updateToggles((draft) => {
+      if (picked === "reset") await reset()
+      else if (picked.startsWith("preset:"))
+        await updateToggles((draft) => {
           draft.preset = picked.slice("preset:".length) as PresetID
           draft.overrides = {}
-        }).catch(() => {}))
-      if (picked === "sound") await updateAudio((draft) => void (draft.enabled = !draft.enabled)).catch(() => {})
-      if (picked === "reports") await updateReport((draft) => void (draft.enabled = !reports())).catch(() => {})
-      return openOptions(picked)
-    }
-
-    // Re-opens after each pick so several switches can be flipped in one go.
-    const chooseFeatures = async (current?: string): Promise<void> => {
-      const choice = ctx.ui.dialog.select<string>({
-        title: "Sidebar features",
-        placeholder: "Filter, then enter to toggle",
-        current,
-        options: [
-          ...FEATURES.map((f) => ({ title: `${on(f.id) ? "●" : "○"} ${f.title}`, value: f.id as string, description: f.description, category: f.group })),
-          { title: "Reset to config defaults", value: "reset", category: "Reset", description: "forget what was picked here" },
-        ],
-      })
-      ctx.ui.dialog.set({ size: "large" })
-      const picked = await choice
-      if (picked === undefined) return
-      if (picked === "reset") await reset()
+        }).catch(() => {})
+      else if (picked === "sound") await updateAudio((draft) => void (draft.enabled = !draft.enabled)).catch(() => {})
+      else if (picked === "reports") await updateReport((draft) => void (draft.enabled = !reports())).catch(() => {})
       else await updateToggles((draft) => void (draft.overrides[picked] = !on(picked as FeatureID))).catch(() => {})
-      return chooseFeatures(picked)
+      return openOptions(picked)
     }
 
     // Toasts for sub-agents. OpenCode itself plays its "subagent_done" / "error" /
