@@ -19,8 +19,7 @@ export const FEATURES = [
   { id: "shells", group: "Sections", title: "Terminal commands", description: "Commands the agent ran, exit codes and durations" },
   { id: "files", group: "Sections", title: "Files", description: "Files written or edited this session" },
   { id: "subagents", group: "Sections", title: "Agents", description: "Delegated sub-agents: status, model, time, current tool, tokens" },
-  { id: "details", group: "Sections", title: "Details link", description: "The '› details' line under the sidebar" },
-  { id: "sound", group: "Sections", title: "Sound switch", description: "The '● Sidebar sound on' line under the sidebar" },
+  { id: "hints", group: "Hints", title: "Hidden-sidebar hints", description: "A ctrl+x b hint in the prompt footer while the sidebar is hidden, and a line on the start screen" },
   { id: "context.bar", group: "Context", title: "Usage bar", description: "Coloured bar" },
   { id: "context.numbers", group: "Context", title: "Used / limit / free", description: "Token counts against the window" },
   { id: "context.breakdown", group: "Context", title: "Token breakdown", description: "Input, output, reasoning, cache" },
@@ -47,8 +46,8 @@ export type Features = Record<FeatureID, boolean>
 const FEATURE_IDS = new Set<string>(FEATURES.map((f) => f.id))
 const ALERT_TOASTS: FeatureID[] = ["alerts.context", "alerts.loop", "alerts.truncation"]
 
-// One-click starting points for /sidebar and the `preset` option. Alerts stay on
-// in every preset: they only fire when something needs attention.
+// One-click starting points for /sidebar and the `preset` option. Alerts and
+// hints stay on in every preset: they only show when something needs attention.
 export const PRESETS = [
   { id: "minimal", title: "Minimal", description: "Context bar and to-do list" },
   { id: "agents", title: "Agents", description: "Context bar, to-do list, agents and activity (default)" },
@@ -66,7 +65,7 @@ const PRESET_ON: Record<PresetID, readonly FeatureID[] | "all"> = {
 
 export function presetFeatures(preset: PresetID): Features {
   const on = PRESET_ON[preset]
-  return Object.fromEntries(FEATURES.map((f) => [f.id, on === "all" || f.group === "Alerts" || on.includes(f.id)])) as Features
+  return Object.fromEntries(FEATURES.map((f) => [f.id, on === "all" || f.group === "Alerts" || f.group === "Hints" || on.includes(f.id)])) as Features
 }
 
 /** The preset whose switches match exactly, if any. */
@@ -88,6 +87,8 @@ export type Options = {
   preset: PresetID
   /** Defaults from config; runtime toggles are layered on top by `resolveFeatures`. */
   features: Features
+  /** Whether run reports can be saved, until switched in the Options menu. Off by default. */
+  report: boolean
 }
 
 export const DEFAULT_OPTIONS: Options = {
@@ -100,6 +101,7 @@ export const DEFAULT_OPTIONS: Options = {
   agentsShown: 8,
   preset: DEFAULT_PRESET,
   features: presetFeatures(DEFAULT_PRESET),
+  report: false,
 }
 
 export function readOptions(raw: Readonly<Record<string, any>> | undefined): Options {
@@ -130,6 +132,7 @@ export function readOptions(raw: Readonly<Record<string, any>> | undefined): Opt
     agentsShown: num("agentsShown", DEFAULT_OPTIONS.agentsShown)!,
     preset,
     features,
+    report: raw?.report === true,
   }
 }
 
@@ -839,4 +842,190 @@ export function throttle(window: number) {
       return true
     },
   }
+}
+
+// ---------------------------------------------------------------------------
+// Run overview: the timeline and per-agent table in /details, and the run report.
+
+export type Span = { start: number; end?: number }
+
+/** When a session was working: one span per turn; the last stays open while it runs. */
+export function busySpans(list: readonly Pick<Turn, "started" | "ended">[], running: boolean): Span[] {
+  return list.map((t, i) => ({ start: t.started, end: running && i === list.length - 1 ? undefined : (t.ended ?? t.started) }))
+}
+
+export type Lane = { name: string; depth: number; state: AgentState; spans: readonly Span[] }
+
+/** `width` cells from `t0` to `t1`, █ where a span covers the cell. Open spans run to `now`. */
+export function laneBar(spans: readonly Span[], t0: number, t1: number, width: number, now: number): string {
+  const total = Math.max(1, t1 - t0)
+  const cells = Array<string>(width).fill(" ")
+  for (const span of spans) {
+    // every span gets at least one cell, however short
+    const from = Math.min(width - 1, Math.max(0, Math.floor(((span.start - t0) / total) * width)))
+    const to = Math.min(width, Math.max(from + 1, Math.ceil((((span.end ?? now) - t0) / total) * width)))
+    for (let i = from; i < to; i++) cells[i] = "█"
+  }
+  return cells.join("")
+}
+
+/** "0s ─────── 6m 12s", exactly `width` columns. */
+export function timelineAxis(duration: number, width: number): string {
+  const end = formatDuration(duration)
+  return `0s ${"─".repeat(Math.max(1, width - 4 - end.length))} ${end}`
+}
+
+/**
+ * The timeline, one lane per agent on a shared time axis, at most `width` columns:
+ *                 0s ──────────────── 6m 12s
+ *   build         ██████████████████████████  ✓ 6m 12s
+ *     aligner       ████████████              ✓ 2m 40s
+ */
+export function timelineLines(lanes: readonly Lane[], now: number, width: number): string[] {
+  const spans = lanes.flatMap((l) => l.spans)
+  if (!spans.length) return []
+  const t0 = Math.min(...spans.map((s) => s.start))
+  const t1 = Math.max(...spans.map((s) => s.end ?? now))
+  const indent = (l: Lane) => "  ".repeat(Math.min(3, l.depth))
+  const nameWidth = Math.min(18, Math.max(...lanes.map((l) => indent(l).length + l.name.length)))
+  // truncate() collapses whitespace, so the indent goes on after it
+  const label = (l: Lane) => `${indent(l)}${truncate(l.name, nameWidth - indent(l).length)}`
+  const tailWidth = 10
+  const barWidth = Math.max(10, width - nameWidth - tailWidth - 2)
+  const lines = [`${" ".repeat(nameWidth + 1)}${timelineAxis(t1 - t0, barWidth)}`]
+  for (const lane of lanes) {
+    if (!lane.spans.length) continue
+    const first = Math.min(...lane.spans.map((s) => s.start))
+    const last = Math.max(...lane.spans.map((s) => s.end ?? now))
+    const tail = `${AGENT_GLYPH[lane.state]} ${formatDuration(last - first)}`
+    lines.push(`${label(lane).padEnd(nameWidth)} ${laneBar(lane.spans, t0, t1, barWidth, now)} ${tail}`)
+  }
+  return lines
+}
+
+export const STATE_WORD: Record<AgentState, string> = { running: "running", waiting: "waiting", done: "done", failed: "failed", interrupted: "stopped", idle: "queued" }
+
+export type AgentStat = {
+  name: string
+  depth: number
+  model?: string
+  state: AgentState
+  time: number
+  tokens: number
+  cost: number
+  tools: number
+  failed: number
+  commands: number
+}
+
+const sum = (rows: readonly AgentStat[], key: "tokens" | "cost" | "tools" | "failed" | "commands") => rows.reduce((n, r) => n + r[key], 0)
+
+/**
+ * Per-agent totals with a total row. The model column is dropped below 90 columns,
+ * the cost column when nothing cost anything (free models).
+ *   agent          model        state     time   tokens     cost tools fail cmds
+ */
+export function statLines(rows: readonly AgentStat[], width: number): string[] {
+  const withModel = width >= 90
+  const withCost = rows.some((r) => r.cost > 0)
+  const indent = (depth: number) => "  ".repeat(Math.min(3, depth))
+  // state 7, time 7, tokens 6, tools 5, fail 4, cmds 4, plus the gaps: 39 columns; cost 8 more, model 15 more
+  const fixed = 39 + (withCost ? 8 : 0) + (withModel ? 15 : 0)
+  const nameWidth = Math.max(5, Math.min(18, width - fixed, Math.max(5, ...rows.map((r) => indent(r.depth).length + r.name.length))))
+  const line = (cells: { depth?: number; name: string; model: string; state: string; time: string; tokens: string; cost: string; tools: string; failed: string; commands: string }) =>
+    [
+      `${indent(cells.depth ?? 0)}${truncate(cells.name, nameWidth - indent(cells.depth ?? 0).length)}`.padEnd(nameWidth),
+      withModel ? truncate(cells.model, 14).padEnd(14) : "",
+      cells.state.padEnd(7),
+      cells.time.padStart(7),
+      cells.tokens.padStart(6),
+      withCost ? cells.cost.padStart(7) : "",
+      cells.tools.padStart(5),
+      cells.failed.padStart(4),
+      cells.commands.padStart(4),
+    ].filter((c) => c !== "").join(" ")
+  const money = (cost: number) => (cost > 0 ? formatCost(cost) : "")
+  return [
+    line({ name: "agent", model: "model", state: "state", time: "time", tokens: "tokens", cost: "cost", tools: "tools", failed: "fail", commands: "cmds" }),
+    ...rows.map((r) =>
+      line({
+        depth: r.depth,
+        name: r.name,
+        model: r.model ?? "",
+        state: STATE_WORD[r.state],
+        time: formatDuration(r.time),
+        tokens: formatTokens(r.tokens),
+        cost: money(r.cost),
+        tools: String(r.tools),
+        failed: String(r.failed),
+        commands: String(r.commands),
+      }),
+    ),
+    line({
+      name: "total",
+      model: "",
+      state: "",
+      time: "",
+      tokens: formatTokens(sum(rows, "tokens")),
+      cost: money(sum(rows, "cost")),
+      tools: String(sum(rows, "tools")),
+      failed: String(sum(rows, "failed")),
+      commands: String(sum(rows, "commands")),
+    }),
+  ]
+}
+
+export type ReportCommand = Pick<Command, "command" | "ok" | "running" | "status" | "started" | "ended"> & { agent: string }
+
+const pad2 = (n: number) => String(n).padStart(2, "0")
+const stamp = (at: number) => {
+  const d = new Date(at)
+  return { date: `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`, time: `${pad2(d.getHours())}:${pad2(d.getMinutes())}` }
+}
+
+/** "reports/rna-seq-qc-swarm-2026-10-13-1402.md", relative to the session directory. */
+export function reportPath(title: string, at: number): string {
+  const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40).replace(/-+$/, "")
+  const { date, time } = stamp(at)
+  return `reports/${slug || "run"}-${date}-${time.replace(":", "")}.md`
+}
+
+const cell = (text: string) => text.replace(/\|/g, "\\|").replace(/\s+/g, " ")
+
+/** The run report: a Markdown summary of the timeline, agents, commands and files. */
+export function reportMarkdown(input: {
+  title: string
+  at: number
+  model?: string
+  timeline: readonly string[]
+  stats: readonly AgentStat[]
+  commands: readonly ReportCommand[]
+  files: readonly string[]
+}): string {
+  const { date, time } = stamp(input.at)
+  const duration = Math.max(0, ...input.stats.map((s) => s.time))
+  const cost = sum(input.stats, "cost")
+  const meta = [input.model, formatDuration(duration), `${formatTokens(sum(input.stats, "tokens"))} tokens`, cost > 0 ? formatCost(cost) : ""].filter(Boolean).join(" · ")
+  const out = [`# Run report: ${input.title}, ${date} ${time}`, "", meta, ""]
+  if (input.timeline.length) out.push("## Timeline", "", "```", ...input.timeline.map((l) => l.trimEnd()), "```", "")
+  out.push("## Per agent", "", "| agent | model | state | time | tokens | cost | tools | failed | commands |", "|---|---|---|---:|---:|---:|---:|---:|---:|")
+  for (const s of input.stats)
+    out.push(`| ${cell(`${"  ".repeat(Math.min(3, s.depth))}${s.name}`)} | ${cell(s.model ?? "")} | ${STATE_WORD[s.state]} | ${formatDuration(s.time)} | ${formatTokens(s.tokens)} | ${s.cost > 0 ? formatCost(s.cost) : ""} | ${s.tools} | ${s.failed} | ${s.commands} |`)
+  out.push("")
+  if (input.commands.length) {
+    out.push("## Commands run", "")
+    for (const c of input.commands) {
+      const glyph = c.running ? "⟳" : c.ok ? "✓" : "✗"
+      const took = c.ended ? ` · ${formatDuration(c.ended - c.started)}` : ""
+      out.push(`- ${glyph} \`${c.command.replace(/`/g, "'")}\` · ${c.agent} · ${c.status}${took}`)
+    }
+    out.push("")
+  }
+  if (input.files.length) out.push("## Files changed", "", ...input.files.map((f) => `- ${f}`), "")
+  return out.join("\n")
+}
+
+/** Tool calls, failures and shell commands among `calls`, for the per-agent table. */
+export function callStats(calls: readonly ToolCall[]): Pick<AgentStat, "tools" | "failed" | "commands"> {
+  return { tools: calls.length, failed: calls.filter((c) => c.status === "error").length, commands: calls.filter((c) => c.name === "shell").length }
 }

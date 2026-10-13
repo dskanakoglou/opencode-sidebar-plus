@@ -8,6 +8,8 @@ import {
   agentLines,
   bar,
   breakdownText,
+  busySpans,
+  callStats,
   callText,
   DELEGATE_TOOL,
   deriveAgents,
@@ -16,13 +18,17 @@ import {
   filesTouched,
   formatDuration,
   formatTokens,
+  isActive,
   relativePath,
   commands,
   sparkline,
+  statLines,
   timeline,
+  timelineLines,
   todoFinished,
   todoList,
   todoSummary,
+  tokenTotal,
   toolCalls,
   teamSummary,
   truncate,
@@ -30,8 +36,12 @@ import {
   waitingBanner,
   type AgentLive,
   type AgentSession,
+  type AgentStat,
+  type AgentState,
   type FeatureID,
+  type Lane,
   type Options,
+  type ReportCommand,
   type Segment,
   type Tone,
   type ToolCall,
@@ -67,6 +77,18 @@ export type Shared = {
   session: (sessionID: string) => SessionView
   /** Starts a store sync once per key for the plugin's lifetime. */
   syncOnce: (key: string, sync: () => Promise<void>) => void
+  /** Marks an element as hovered or not; the pointer is a hand while any clickable one is. */
+  pointer: (key: object, hovered: boolean) => void
+  /** What the buttons, the Options menu and the command palette do. */
+  actions: {
+    run: (sessionID: string, prefill?: string) => void
+    rerun: (sessionID: string, command: string) => void
+    details: () => void
+    options: () => void
+    report: (sessionID: string) => void
+  }
+  /** Whether run reports can be saved (Options › Run reports). Reactive. */
+  reports: () => boolean
 }
 
 export type SessionView = {
@@ -135,6 +157,36 @@ function useNow(active: () => boolean) {
   return now
 }
 
+// Terminals that support it (OSC 22) show a hand while anything clickable is
+// hovered; others ignore the request. Hover events reach boxes, not bare text,
+// so this is a box. Without `onClick` it is plain content.
+export function Clickable(props: { shared: Shared; onClick?: () => void; onHover?: (on: boolean) => void; flexDirection?: "row" | "column"; gap?: number; children: JSX.Element }) {
+  const key = {}
+  const hover = (on: boolean) => {
+    props.shared.pointer(key, on && props.onClick !== undefined)
+    props.onHover?.(on)
+  }
+  onCleanup(() => props.shared.pointer(key, false))
+  return (
+    <box flexDirection={props.flexDirection} gap={props.gap} onMouseOver={() => hover(true)} onMouseOut={() => hover(false)} onMouseUp={() => props.onClick?.()}>
+      {props.children}
+    </box>
+  )
+}
+
+/** A text button: accent label, highlighted while hovered. */
+export function Button(props: { shared: Shared; label: string; onClick: () => void; muted?: boolean }) {
+  const theme = props.shared.ctx.theme
+  const [hovered, setHovered] = createSignal(false)
+  return (
+    <Clickable shared={props.shared} onClick={props.onClick} onHover={setHovered}>
+      <text fg={hovered() ? accent(props.shared.ctx) : props.muted ? theme.text.muted : theme.text.base} bg={hovered() ? theme.background.raised.high : undefined}>
+        {props.label}
+      </text>
+    </Clickable>
+  )
+}
+
 function Section(props: {
   shared: Shared
   id: string
@@ -151,7 +203,7 @@ function Section(props: {
   const collapsed = () => props.shared.collapsed[props.id] === true
   return (
     <box>
-      <box flexDirection="row" gap={1} onMouseUp={() => props.shared.toggle(props.id)}>
+      <Clickable shared={props.shared} flexDirection="row" gap={1} onClick={() => props.shared.toggle(props.id)}>
         <text fg={theme.text.base}>{collapsed() ? "▶" : "▼"}</text>
         <text fg={theme.text.base}>
           <b>{props.title}</b>
@@ -164,7 +216,7 @@ function Section(props: {
             <Index each={props.segments}>{(segment) => <text fg={segment().fg}>{segment().text}</text>}</Index>
           </box>
         </Show>
-      </box>
+      </Clickable>
       {props.banner}
       <Show when={!collapsed()}>
         <box paddingLeft={2}>{props.children}</box>
@@ -314,11 +366,11 @@ export function ActivitySection(props: { shared: Shared; sessionID: string }) {
             const what = () => (call.name === DELEGATE_TOOL ? callText(call) : `${call.name} ${relativePath(call.label, s.info()?.location.directory)}`)
             const live = () => (call.status === "running" || call.status === "streaming" ? ` · ${formatDuration(now() - call.started)}` : "")
             // a delegation opens the sub-agent's session
-            const open = () => call.child && ctx.ui.router.navigate({ type: "session", sessionID: call.child })
+            const open = call.child ? () => ctx.ui.router.navigate({ type: "session", sessionID: call.child! }) : undefined
             return (
-              <text fg={toolColor(ctx, call.status)} onMouseUp={open}>
-                {`${truncate(`${ICON[call.status]} ${what()}`, WIDTH - live().length)}${live()}`}
-              </text>
+              <Clickable shared={props.shared} onClick={open}>
+                <text fg={toolColor(ctx, call.status)}>{`${truncate(`${ICON[call.status]} ${what()}`, WIDTH - live().length)}${live()}`}</text>
+              </Clickable>
             )
           }}
         </For>
@@ -356,7 +408,13 @@ export function ShellsSection(props: { shared: Shared; sessionID: string }) {
           {(cmd) => {
             const fg = () => (cmd.running || cmd.ok ? accent(ctx) : theme.text.feedback.error.base)
             const tail = () => (cmd.running ? formatDuration(now() - cmd.started) : `${cmd.status} · ${formatDuration((cmd.ended ?? cmd.started) - cmd.started)}`)
-            return <Line fg={fg()}>{`${truncate(`${cmd.running ? "⟳" : cmd.ok ? "✓" : "✗"} ${cmd.command}`, WIDTH - tail().length - 1)} ${tail()}`}</Line>
+            // a finished command offers to run again; nothing runs on the click itself
+            const again = () => (cmd.running ? undefined : () => props.shared.actions.rerun(props.sessionID, cmd.command))
+            return (
+              <Clickable shared={props.shared} onClick={again()}>
+                <Line fg={fg()}>{`${truncate(`${cmd.running ? "⟳" : cmd.ok ? "✓" : "✗"} ${cmd.command}`, WIDTH - tail().length - 1)} ${tail()}`}</Line>
+              </Clickable>
+            )
           }}
         </For>
       </Section>
@@ -419,61 +477,68 @@ export function hasAgents(ctx: Context, sessionID: string): boolean {
   return sessions.some((s) => s.id !== rootID && s.parentID)
 }
 
-// Kept under the `subagents` id so v0.1 configs (sections, features) still apply.
-export function SubagentsSection(props: { shared: Shared; sessionID: string }) {
-  const { ctx, options } = props.shared
-  const theme = ctx.theme
-  const { data } = ctx
-  const family = createMemo(() => familySessions(ctx, props.sessionID))
-  const descendants = createMemo(() => {
-    const { rootID, sessions } = family()
-    return [...new Set(sessions.filter((s) => s.id !== rootID && s.parentID).map((s) => s.id))]
-  })
+type Family = { rootID: string; sessions: SessionInfo[] }
+
+/** What the store knows right now about every sub-agent in the family. */
+function familyLive(shared: Shared, family: Family): Record<string, AgentLive> {
+  const { data } = shared.ctx
+  const descendants = [...new Set(family.sessions.filter((s) => s.id !== family.rootID && s.parentID).map((s) => s.id))]
   // child id -> status of the delegation call that started it, from every parent's calls
-  const delegations = createMemo(() => {
-    const out: Record<string, ToolCall["status"]> = {}
-    const parents = new Set([family().rootID, ...family().sessions.flatMap((s) => (s.parentID ? [s.parentID] : []))])
-    for (const id of parents) for (const call of props.shared.session(id).calls()) if (call.child) out[call.child] = call.status
-    return out
-  })
-  const live = createMemo(() => {
-    const out: Record<string, AgentLive> = {}
-    for (const id of descendants()) {
-      const status = data.session.status(id)
-      const entry: AgentLive = {
-        status,
-        approvals: data.session.permission.list(id)?.length ?? 0,
-        questions: data.session.form.list(id)?.length ?? 0,
-        call: delegations()[id],
-      }
-      if (status === "running") {
-        const current = props.shared.session(id).calls().findLast((c) => c.status === "running" || c.status === "streaming")
-        if (current) entry.tool = { name: current.name, label: current.label }
-      }
-      out[id] = entry
+  const delegations: Record<string, ToolCall["status"]> = {}
+  const parents = new Set([family.rootID, ...family.sessions.flatMap((s) => (s.parentID ? [s.parentID] : []))])
+  for (const id of parents) for (const call of shared.session(id).calls()) if (call.child) delegations[call.child] = call.status
+  const out: Record<string, AgentLive> = {}
+  for (const id of descendants) {
+    const status = data.session.status(id)
+    const entry: AgentLive = {
+      status,
+      approvals: data.session.permission.list(id)?.length ?? 0,
+      questions: data.session.form.list(id)?.length ?? 0,
+      call: delegations[id],
     }
-    return out
-  })
+    if (status === "running") {
+      const current = shared.session(id).calls().findLast((c) => c.status === "running" || c.status === "streaming")
+      if (current) entry.tool = { name: current.name, label: current.label }
+    }
+    out[id] = entry
+  }
+  return out
+}
+
+/** The family's agents, live: the Agents section, the waiting strip and /details share this. */
+function useAgents(shared: Shared, sessionID: () => string, finishedLimit: number) {
+  const { data } = shared.ctx
+  const family = createMemo(() => familySessions(shared.ctx, sessionID()))
+  const live = createMemo(() => familyLive(shared, family()))
   // Messages and permission requests of a child are loaded once, while it runs;
   // after that the host keeps them current from events.
   createEffect(() => {
     for (const [id, entry] of Object.entries(live())) {
       if (entry.status !== "running") continue
-      props.shared.syncOnce(`messages:${id}`, () => data.session.message.sync(id))
-      props.shared.syncOnce(`permissions:${id}`, () => data.session.permission.sync(id))
+      shared.syncOnce(`messages:${id}`, () => data.session.message.sync(id))
+      shared.syncOnce(`permissions:${id}`, () => data.session.permission.sync(id))
     }
   })
   const active = createMemo(() => Object.values(live()).some((l) => l.status === "running" || l.approvals || l.questions))
   const now = useNow(active)
-  const agents = createMemo(() =>
-    deriveAgents({ rootID: family().rootID, sessions: family().sessions as AgentSession[], live: live(), now: now(), finishedLimit: options.agentsShown }),
-  )
+  const agents = createMemo(() => deriveAgents({ rootID: family().rootID, sessions: family().sessions as AgentSession[], live: live(), now: now(), finishedLimit }))
+  return { family, agents }
+}
+
+const openSession = (ctx: Context, sessionID: string) => ctx.ui.router.navigate({ type: "session", sessionID })
+
+// Kept under the `subagents` id so v0.1 configs (sections, features) still apply.
+export function SubagentsSection(props: { shared: Shared; sessionID: string }) {
+  const { ctx, options } = props.shared
+  const theme = ctx.theme
+  const { data } = ctx
+  const { family, agents } = useAgents(props.shared, () => props.sessionID, options.agentsShown)
   // "3/5 done · 1 running · 1 waiting · $0.02", in the columns left after "▼ Agents "
   const segments = createMemo(() =>
     teamSummary(agents(), data.session.cost(family().rootID), WIDTH + 2 - "▼ Agents ".length).map((s: Segment) => ({ text: s.text, fg: agentColor(ctx, s.tone) })),
   )
   const banner = createMemo(() => (props.shared.on("subagents.banner") ? waitingBanner(agents().rows, WIDTH + 2) : undefined))
-  const open = (sessionID: string) => ctx.ui.router.navigate({ type: "session", sessionID })
+  const open = (sessionID: string) => openSession(ctx, sessionID)
 
   return (
     <Show when={agents().total > 0}>
@@ -485,12 +550,12 @@ export function SubagentsSection(props: { shared: Shared; sessionID: string }) {
         banner={
           <Show when={banner()}>
             {(b) => (
-              <box onMouseUp={() => open(b().target)}>
+              <Clickable shared={props.shared} onClick={() => open(b().target)}>
                 <text fg={theme.text.feedback.warning.base}>
                   <b>{b().title}</b>
                 </text>
                 <text fg={theme.text.feedback.warning.base}>{b().hint}</text>
-              </box>
+              </Clickable>
             )}
           </Show>
         }
@@ -500,13 +565,13 @@ export function SubagentsSection(props: { shared: Shared; sessionID: string }) {
             const lines = () => agentLines(row(), WIDTH)
             const detailFg = () => (row().state === "waiting" ? theme.text.feedback.warning.base : row().state === "failed" ? theme.text.feedback.error.base : theme.text.muted)
             return (
-              <box onMouseUp={() => open(row().id)}>
+              <Clickable shared={props.shared} onClick={() => open(row().id)}>
                 <box flexDirection="row">
                   <text fg={agentColor(ctx, row().state)}>{lines().glyph}</text>
                   <text fg={row().id === props.sessionID ? accent(ctx) : theme.text.base}>{lines().rest}</text>
                 </box>
                 <text fg={detailFg()}>{lines().detail}</text>
-              </box>
+              </Clickable>
             )
           }}
         </Index>
@@ -518,13 +583,116 @@ export function SubagentsSection(props: { shared: Shared; sessionID: string }) {
   )
 }
 
-export function DetailsHint(props: { shared: Shared }) {
+/** The button row at the foot of the sidebar, in every preset. */
+export function SidebarFooter(props: { shared: Shared; sessionID: string }) {
+  const { actions } = props.shared
+  return (
+    <box flexDirection="row" gap={2}>
+      <Button shared={props.shared} label="▶ Run" onClick={() => actions.run(props.sessionID)} />
+      <Button shared={props.shared} label="≡ Details" onClick={actions.details} />
+      <Button shared={props.shared} label="⚙ Options" onClick={actions.options} />
+    </box>
+  )
+}
+
+/** In the prompt footer while the sidebar is hidden; a click brings it back. */
+export function HiddenHint(props: { shared: Shared }) {
   const { ctx } = props.shared
   return (
-    <text fg={accent(ctx)} onMouseUp={() => ctx.ui.panel.open(PANEL)}>
-      {"› Run details  /details"}
-    </text>
+    <Clickable shared={props.shared} onClick={() => ctx.keymap.dispatch("sidebar.toggle")}>
+      <text fg={ctx.theme.text.muted}>{"sidebar hidden · ctrl+x b"}</text>
+    </Clickable>
   )
+}
+
+/** Above the prompt while the sidebar is hidden and a sub-agent waits for the user. */
+export function WaitingStrip(props: { shared: Shared; sessionID: string }) {
+  const { ctx } = props.shared
+  const { agents } = useAgents(props.shared, () => props.sessionID, 0)
+  const banner = createMemo(() => waitingBanner(agents().rows, 60))
+  return (
+    <Show when={banner()}>
+      {(b) => (
+        <Clickable shared={props.shared} flexDirection="row" gap={1} onClick={() => openSession(ctx, b().target)}>
+          <text fg={ctx.theme.text.feedback.warning.base}>
+            <b>{b().title}</b>
+          </text>
+          <text fg={ctx.theme.text.feedback.warning.base}>{"· answer below, or click to open"}</text>
+        </Clickable>
+      )}
+    </Show>
+  )
+}
+
+/** On the start screen, where OpenCode shows no sidebar; a click opens the Options menu. */
+export function HomeLine(props: { shared: Shared }) {
+  const { ctx } = props.shared
+  return (
+    <Clickable shared={props.shared} onClick={props.shared.actions.options}>
+      <text fg={ctx.theme.text.muted}>{"Sidebar Plus shows after your first message · /sidebar"}</text>
+    </Clickable>
+  )
+}
+
+/**
+ * Everything /details and the run report show about a conversation and its
+ * sub-agents, read from the store. Reactive when called inside a memo.
+ */
+export function runOverview(shared: Shared, sessionID: string, now: number, width: number) {
+  const { ctx } = shared
+  const family = familySessions(ctx, sessionID)
+  const agents = deriveAgents({ rootID: family.rootID, sessions: family.sessions as AgentSession[], live: familyLive(shared, family), now, finishedLimit: Infinity })
+  const root = shared.session(family.rootID)
+  const info = root.info()
+  const directory = info?.location.directory
+  const mainTurns = turns(root.messages())
+  const mainState: AgentState = root.running() ? "running" : "done"
+  const mainName = info?.agent ?? "main"
+  const lanes: Lane[] = [
+    { name: mainName, depth: 0, state: mainState, spans: busySpans(mainTurns, root.running()) },
+    ...agents.rows.map((r) => {
+      const own = busySpans(turns(shared.session(r.id).messages()), isActive(r.state))
+      // before its messages are loaded, an agent's lifetime stands in for its turns
+      return { name: r.agent, depth: r.depth, state: r.state, spans: own.length || r.state === "idle" ? own : [{ start: r.started, end: r.ended }] }
+    }),
+  ]
+  const first = mainTurns[0]?.started
+  const last = mainTurns.at(-1)
+  const stats: AgentStat[] = [
+    {
+      name: mainName,
+      depth: 0,
+      model: info?.model?.id,
+      state: mainState,
+      time: first === undefined ? 0 : (root.running() ? now : (last!.ended ?? last!.started)) - first,
+      tokens: tokenTotal(info?.tokens),
+      cost: info?.cost ?? 0,
+      ...callStats(root.calls()),
+    },
+    ...agents.rows.map((r) => ({ name: r.agent, depth: r.depth, model: r.model, state: r.state, time: r.elapsed, tokens: r.tokens, cost: r.cost, ...callStats(shared.session(r.id).calls()) })),
+  ]
+  // every command in the family, attributed to the agent whose call ran it;
+  // background shells nobody's call started are the user's
+  const owner = new Map<string, string>()
+  const calls = [{ id: family.rootID, name: mainName }, ...agents.rows.map((r) => ({ id: r.id, name: r.agent }))].flatMap(({ id, name }) =>
+    shared.session(id).calls().map((c) => (owner.set(c.id, name), c)),
+  )
+  const ran: ReportCommand[] = commands([], ctx.data.shell.list(info?.location), shared.finishedShells(directory), Infinity, calls)
+    .map((c) => ({ ...c, agent: owner.get(c.id) ?? "you" }))
+    .sort((a, b) => a.started - b.started)
+  const files = [...new Set([family.rootID, ...agents.rows.map((r) => r.id)].flatMap((id) => filesTouched(shared.session(id).messages(), shared.session(id).calls()).map((f) => relativePath(f.path, directory))))]
+  return {
+    rootID: family.rootID,
+    title: info?.title ?? "Untitled session",
+    model: info?.model?.id,
+    directory,
+    agents,
+    timeline: timelineLines(lanes, now, width),
+    table: statLines(stats, width),
+    stats,
+    commands: ran,
+    files,
+  }
 }
 
 export function DetailsPanel(props: { shared: Shared; input: { sessionID: string; close: () => void; width: number } }) {
@@ -536,6 +704,14 @@ export function DetailsPanel(props: { shared: Shared; input: { sessionID: string
   const history = createMemo(() => contextHistory(s.messages()))
   const calls = createMemo(() => activity(s.messages(), { ...options, recentTools: 40 }, s.calls()).recent)
   const width = () => Math.max(40, props.input.width - 4)
+  const family = createMemo(() => familySessions(ctx, props.input.sessionID))
+  // every agent's messages, for its turns and tool calls, loaded once
+  createEffect(() => {
+    for (const session of family().sessions) props.shared.syncOnce(`messages:${session.id}`, () => ctx.data.session.message.sync(session.id))
+  })
+  const active = createMemo(() => [family().rootID, ...family().sessions.map((x) => x.id)].some((id) => ctx.data.session.status(id) === "running"))
+  const now = useNow(active)
+  const overview = createMemo(() => runOverview(props.shared, props.input.sessionID, now(), width()))
   // Lives only while the panel is mounted; outranks OpenCode's esc-to-interrupt, so the first esc closes the panel.
   ctx.keymap.layer(() => ({
     mode: "global",
@@ -546,14 +722,33 @@ export function DetailsPanel(props: { shared: Shared; input: { sessionID: string
   return (
     <box flexGrow={1} paddingLeft={1} paddingRight={1}>
       <box flexDirection="row" justifyContent="space-between">
-        <text fg={theme.text.base}>
-          <b>{`Session details · ${truncate(s.info()?.title ?? props.input.sessionID, width() - 30)}`}</b>
-        </text>
-        <text fg={theme.text.muted} onMouseUp={() => props.input.close()}>
-          {"esc close"}
-        </text>
+          <text fg={theme.text.base}>
+            <b>{`Session details · ${truncate(s.info()?.title ?? props.input.sessionID, width() - 45)}`}</b>
+          </text>
+          <box flexDirection="row" gap={2}>
+            <Show when={props.shared.reports()}>
+              <Button shared={props.shared} label="↓ Save report" onClick={() => props.shared.actions.report(props.input.sessionID)} />
+            </Show>
+            <Button shared={props.shared} label="esc close" muted onClick={() => props.input.close()} />
+          </box>
       </box>
       <scrollbox flexGrow={1}>
+        <Show when={overview().agents.total > 0}>
+          <box paddingTop={1}>
+            <text fg={theme.text.base}>
+              <b>Timeline</b>
+            </text>
+            <For each={overview().timeline}>{(line, i) => <text fg={i() === 0 ? theme.text.muted : theme.text.base}>{line}</text>}</For>
+          </box>
+          <box paddingTop={1}>
+            <text fg={theme.text.base}>
+              <b>Agents</b>
+            </text>
+            <For each={overview().table}>
+              {(line, i) => <text fg={i() === 0 || i() === overview().table.length - 1 ? theme.text.muted : theme.text.base}>{line}</text>}
+            </For>
+          </box>
+        </Show>
         <Show when={usage()}>
           {(u) => (
             <box paddingTop={1}>

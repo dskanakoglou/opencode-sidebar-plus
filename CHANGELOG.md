@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.3.0
+
+### Added
+
+- **Buttons** at the foot of the sidebar, in every preset: **▶ Run**, **≡ Details**
+  and **⚙ Options**.
+- **▶ Run**: type a command, then run it **in chat** (like `!` in the prompt; the
+  agent sees the output) or **in background** (shows under Terminal commands).
+  The last choice is remembered. Clicking a finished command offers **Run again**
+  or **Edit, then run…**; nothing runs on the click itself.
+- **⚙ Options** (also `/sidebar`): Run a command, Session details and Save run
+  report first, then presets, Custom…, sidebar sound, run reports and reset.
+- **Details panel**: a timeline (one lane per agent on a shared time axis) and a
+  per-agent table (model, state, time, tokens, cost, tools, failures, commands,
+  totals) above the existing views. The cost column is left out when nothing
+  cost anything.
+- **Run reports**, off by default (`"report": true`, or ⚙ Options): a Markdown
+  summary of the run (timeline, per-agent table, every command with the agent
+  that ran it, files changed), saved from the details panel or the menu.
+- **While the sidebar is hidden**: `sidebar hidden · ctrl+x b` in the prompt
+  footer (click to bring it back), and a waiting sub-agent named above the
+  prompt. A line on the start screen says the sidebar appears after the first
+  message. Switch: `hints`.
+- **Pointer shapes** (OSC 22): an arrow over OpenCode and a hand over anything
+  clickable in the sidebar, with iTerm2's X11 names and CSS names elsewhere.
+- Terminal commands shows, in any preset, once you start a background command.
+
+### Changed
+
+- `/sidebar` opens the Options menu. `/details` and `/sidebar-sound` are gone
+  (the button, the menu and the command palette cover them), and so is
+  `/sidebar-notify-test`.
+- The `details` and `sound` switches are gone with the lines they controlled.
+
 ## 0.2.1
 
 ### Fixed

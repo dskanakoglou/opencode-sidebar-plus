@@ -34,7 +34,16 @@ import {
   teamSummary,
   throttle,
   waitingBanner,
+  busySpans,
+  callStats,
+  laneBar,
+  reportMarkdown,
+  reportPath,
+  statLines,
+  timelineAxis,
+  timelineLines,
   type AgentRow,
+  type AgentStat,
   type AgentSession,
   type ToolCall,
 } from "../src/derive.ts"
@@ -436,9 +445,9 @@ test("presets: Agents is the default; Minimal and Full; legacy configs keep ever
   assert.equal(matchPreset(DEFAULT_OPTIONS.features), "agents")
   const agents = presetFeatures("agents")
   for (const id of ["context", "context.bar", "todo", "subagents", "activity", "alerts.agents"] as const) assert.equal(agents[id], true, id)
-  for (const id of ["shells", "files", "details", "sound", "context.sparkline"] as const) assert.equal(agents[id], false, id)
+  for (const id of ["shells", "files", "context.sparkline"] as const) assert.equal(agents[id], false, id)
   const minimal = presetFeatures("minimal")
-  assert.deepEqual(FEATURES.filter((f) => minimal[f.id] && f.group !== "Alerts").map((f) => f.id), ["context", "todo", "context.bar", "todo.done"])
+  assert.deepEqual(FEATURES.filter((f) => minimal[f.id] && f.group !== "Alerts" && f.group !== "Hints").map((f) => f.id), ["context", "todo", "context.bar", "todo.done"])
   assert.ok(FEATURES.every((f) => presetFeatures("full")[f.id]))
   assert.equal(readOptions({ preset: "minimal" }).features.activity, false)
   assert.equal(readOptions({ preset: "bogus" }).preset, "agents")
@@ -543,4 +552,95 @@ test("token breakdown drops separators before it would wrap", () => {
   assert.equal(breakdownText(b, 34), "in 1.5k out 42 think 90 cache 7.7k")
   assert.equal(breakdownText({ ...b, reasoning: 0, cache: 0 }, 34), "in 1.5k · out 42")
   assert.ok(breakdownText({ input: 150_000, output: 12_345, reasoning: 99_999, cache: 120_000 }, 34).length <= 34)
+})
+
+test("hints stay on in every preset; reports are off unless the config turns them on", () => {
+  for (const preset of ["minimal", "agents", "full"] as const) assert.equal(presetFeatures(preset).hints, true, preset)
+  assert.equal(readOptions({}).report, false)
+  assert.equal(readOptions({ report: true }).report, true)
+  assert.equal(readOptions({ report: "yes" }).report, false)
+})
+
+test("busy spans: one per turn; only a running session's last turn stays open", () => {
+  const list = [{ started: 0, ended: 50 }, { started: 100, ended: 120 }]
+  assert.deepEqual(busySpans(list, false), [{ start: 0, end: 50 }, { start: 100, end: 120 }])
+  assert.deepEqual(busySpans(list, true), [{ start: 0, end: 50 }, { start: 100, end: undefined }])
+  // a turn with no reply yet is a point, not an open span
+  assert.deepEqual(busySpans([{ started: 7, ended: undefined }], false), [{ start: 7, end: 7 }])
+})
+
+test("lane bars: shared axis, every span visible, open spans run to now", () => {
+  assert.equal(laneBar([{ start: 0, end: 50 }], 0, 100, 10, 0), "█████     ")
+  assert.equal(laneBar([{ start: 50, end: 100 }], 0, 100, 10, 0), "     █████")
+  assert.equal(laneBar([{ start: 0, end: 20 }, { start: 80, end: 100 }], 0, 100, 10, 0), "██      ██")
+  // a 1 ms call still shows as one cell; one starting at the very end too
+  assert.equal(laneBar([{ start: 30, end: 31 }], 0, 100, 10, 0), "   █      ")
+  assert.equal(laneBar([{ start: 100, end: 100 }], 0, 100, 10, 0), "         █")
+  assert.equal(laneBar([{ start: 50 }], 0, 100, 10, 70), "     ██   ")
+})
+
+test("timeline: axis and lanes fit the width; sub-agents indented under the main agent", () => {
+  assert.equal(timelineAxis(372_000, 30).length, 30)
+  assert.match(timelineAxis(372_000, 30), /^0s ─+ 6m 12s$/)
+  const lines = timelineLines(
+    [
+      { name: "build", depth: 0, state: "done", spans: [{ start: 0, end: 372_000 }] },
+      { name: "aligner", depth: 1, state: "done", spans: [{ start: 10_000, end: 170_000 }] },
+      { name: "qc-checker", depth: 1, state: "failed", spans: [{ start: 20_000, end: 145_000 }] },
+      { name: "queued-one", depth: 1, state: "idle", spans: [] },
+    ],
+    400_000,
+    80,
+  )
+  assert.equal(lines.length, 4, "queued agents without spans get no lane")
+  for (const line of lines) assert.ok(line.length <= 80, line)
+  assert.match(lines[1], /^build +█+ ✓ 6m 12s$/)
+  assert.match(lines[2], /^  aligner +█+ +✓ 2m 40s$/)
+  assert.match(lines[3], /✗ 2m 05s$/)
+  assert.deepEqual(timelineLines([], 0, 80), [])
+})
+
+test("per-agent table: totals add up; the model column goes on narrow panels", () => {
+  const rows: AgentStat[] = [
+    { name: "build", depth: 0, model: "big-pickle", state: "done", time: 372_000, tokens: 22_800, cost: 0, tools: 4, failed: 0, commands: 1 },
+    { name: "aligner", depth: 1, model: "big-pickle", state: "done", time: 160_000, tokens: 14_100, cost: 0.012, tools: 9, failed: 0, commands: 3 },
+    { name: "qc-checker", depth: 1, model: "big-pickle", state: "failed", time: 125_000, tokens: 11_300, cost: 0, tools: 6, failed: 1, commands: 2 },
+  ]
+  const wide = statLines(rows, 100)
+  assert.equal(wide.length, 5)
+  assert.match(wide[0], /^agent +model +state +time +tokens +cost +tools fail cmds$/)
+  assert.match(wide[2], /^  aligner +big-pickle +done +2m 40s +14\.1k +\$0\.012 +9 +0 +3$/)
+  assert.match(wide[4], /^total +48\.2k +\$0\.012 +19 +1 +6$/)
+  const narrow = statLines(rows, 60)
+  assert.ok(!narrow[0].includes("model"))
+  for (const line of narrow) assert.ok(line.length <= 60, line)
+  assert.deepEqual(callStats([{ name: "shell", status: "completed" }, { name: "read", status: "error" }, { name: "shell", status: "error" }] as ToolCall[]), { tools: 3, failed: 2, commands: 2 })
+})
+
+test("run report: a readable file name, and Markdown that survives odd input", () => {
+  const at = new Date(2026, 9, 13, 14, 2).getTime()
+  assert.equal(reportPath("RNA-seq QC swarm!", at), "reports/rna-seq-qc-swarm-2026-10-13-1402.md")
+  assert.equal(reportPath("???", at), "reports/run-2026-10-13-1402.md")
+  const md = reportMarkdown({
+    title: "RNA-seq QC swarm",
+    at,
+    model: "big-pickle",
+    timeline: ["            0s ─── 6m 12s", "build       ███   ✓ 6m 12s"],
+    stats: [{ name: "qc|checker", depth: 1, state: "failed", time: 125_000, tokens: 11_300, cost: 0, tools: 6, failed: 1, commands: 1 }],
+    commands: [{ command: "fastqc `missing`.fq", agent: "qc-checker", ok: false, running: false, status: "exit 1", started: 0, ended: 4000 }],
+    files: ["results/qc_summary.md"],
+  })
+  assert.match(md, /^# Run report: RNA-seq QC swarm, 2026-10-13 14:02\n\nbig-pickle · 2m 05s · 11\.3k tokens\n/)
+  assert.match(md, /## Timeline\n\n```\n {12}0s ─── 6m 12s\nbuild {7}███ {3}✓ 6m 12s\n```/)
+  assert.match(md, /\| {2}qc\\\|checker \|/)
+  assert.match(md, /- ✗ `fastqc 'missing'\.fq` · qc-checker · exit 1 · 4s/)
+  assert.match(md, /## Files changed\n\n- results\/qc_summary\.md/)
+  const quiet = reportMarkdown({ title: "t", at, timeline: [], stats: [], commands: [], files: [] })
+  assert.ok(!quiet.includes("## Commands run") && !quiet.includes("## Timeline") && !quiet.includes("## Files"))
+})
+
+test("per-agent table: no cost column when nothing cost anything", () => {
+  const free: AgentStat[] = [{ name: "build", depth: 0, state: "done", time: 1000, tokens: 100, cost: 0, tools: 1, failed: 0, commands: 0 }]
+  assert.ok(!statLines(free, 60)[0].includes("cost"))
+  assert.ok(statLines([{ ...free[0], cost: 0.5 }], 60)[0].includes("cost"))
 })
