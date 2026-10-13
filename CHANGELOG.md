@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.1
+
+### Fixed
+
+- `esc` closes the `/details` panel. Before, only the small `[close]` link did,
+  and the open panel hid the sidebar. While the agent is working, the first `esc`
+  closes the panel and the agent keeps going; press `esc` again to interrupt it
+  as usual. The header now reads `esc close` (still clickable).
+
 ## 0.2.0
 
 Built for live multi-agent ("swarm") runs: one coordinator delegating to several

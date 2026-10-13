@@ -136,7 +136,7 @@ The plugin observes delegation; it does not create or coordinate agents.
 | **Agent activity** | Running or ready and for how long; the last few tool calls with a live timer on the current one; tool count and failures; retries; the last error; and a **loop warning** when the model keeps calling the same tool on the same target. |
 | **Terminal commands** | Commands the agent ran and background shells, with live timers, exit codes and durations. |
 | **Files** | Files written, edited or patched in this session, and the git branch. |
-| **Details panel** | `/details` (or the `› Run details` line) opens a full-width panel with context growth, a per-turn table and the last 40 tool calls. |
+| **Details panel** | `/details` (or the `› Run details` line) opens a full-width panel with context growth, a per-turn table and the last 40 tool calls. `esc` closes it. |
 
 Sections with nothing to show are hidden. Click a heading (`▼` / `▶`) to
 collapse or expand it; this is remembered. Colours come from your theme.

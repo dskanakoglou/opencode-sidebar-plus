@@ -536,6 +536,12 @@ export function DetailsPanel(props: { shared: Shared; input: { sessionID: string
   const history = createMemo(() => contextHistory(s.messages()))
   const calls = createMemo(() => activity(s.messages(), { ...options, recentTools: 40 }, s.calls()).recent)
   const width = () => Math.max(40, props.input.width - 4)
+  // Lives only while the panel is mounted; outranks OpenCode's esc-to-interrupt, so the first esc closes the panel.
+  ctx.keymap.layer(() => ({
+    mode: "global",
+    priority: 100,
+    commands: [{ title: "Close session details", group: "Sidebar", bind: "escape", run: () => props.input.close() }],
+  }))
 
   return (
     <box flexGrow={1} paddingLeft={1} paddingRight={1}>
@@ -544,7 +550,7 @@ export function DetailsPanel(props: { shared: Shared; input: { sessionID: string
           <b>{`Session details · ${truncate(s.info()?.title ?? props.input.sessionID, width() - 30)}`}</b>
         </text>
         <text fg={theme.text.muted} onMouseUp={() => props.input.close()}>
-          {"[close]"}
+          {"esc close"}
         </text>
       </box>
       <scrollbox flexGrow={1}>
