@@ -2,14 +2,28 @@
 import { For, Show } from "solid-js"
 import type { Plugin } from "@opencode/plugin/tui"
 import type { ShellInfo } from "@opencode/client"
-import { FEATURES, formatDuration, readOptions, resolveFeatures, truncate, type FeatureID, type SectionID } from "./src/derive.ts"
+import {
+  FEATURES,
+  formatDuration,
+  matchPreset,
+  PRESETS,
+  readOptions,
+  resolveFeatures,
+  sectionOrder,
+  truncate,
+  type FeatureID,
+  type PresetID,
+  type SectionID,
+} from "./src/derive.ts"
 import {
   ActivitySection,
   ContextSection,
   DetailsHint,
   DetailsPanel,
   FilesSection,
+  hasAgents,
   PANEL,
+  sessionCache,
   ShellsSection,
   SubagentsSection,
   TodoSection,
@@ -37,9 +51,13 @@ const plugin: Plugin.Definition = {
       ctx.ui.toast.show({ variant: "info", message: `Sidebar sound ${audio.enabled ? "on" : "off"}. OpenCode's own sounds and OS settings are separate.` })
     }
     const [sections, updateSections] = ctx.storage.store("sections", { initial: { collapsed: {} as Record<string, boolean> } })
-    const [toggles, updateToggles] = ctx.storage.store("features", { initial: { overrides: {} as Record<string, boolean> } })
-    const on = (id: FeatureID) => resolveFeatures(options.features, toggles.overrides)[id]
+    // `preset` is "" until one is picked in /sidebar; config defaults apply until then.
+    const [toggles, updateToggles] = ctx.storage.store("features", { initial: { overrides: {} as Record<string, boolean>, preset: "" as string } })
+    const features = () => resolveFeatures(options.features, toggles.overrides, toggles.preset)
+    const on = (id: FeatureID) => features()[id]
     const seen = new Set<string>()
+    const sessions = sessionCache(ctx)
+    const synced = new Set<string>()
     const [finished, updateFinished] = ctx.storage.memory("finished-shells", { initial: { list: [] as FinishedShell[] } })
     const background = new Map<string, FinishedShell>()
     const started = new Map<string, { command: string; at: number; sessionID?: string }>()
@@ -70,6 +88,41 @@ const plugin: Plugin.Definition = {
       on,
       once: (key) => (seen.has(key) ? false : (seen.add(key), true)),
       finishedShells: (directory) => finished.list.filter((s) => !directory || !s.directory || s.directory === directory),
+      session: (sessionID) => sessions.get(sessionID),
+      syncOnce: (key, sync) => {
+        if (synced.has(key)) return
+        synced.add(key)
+        sync().catch(() => synced.delete(key))
+      },
+    }
+
+    const reset = () =>
+      updateToggles((draft) => {
+        draft.overrides = {}
+        draft.preset = ""
+      }).catch(() => {})
+
+    // Presets first; the individual switches live under "Custom…".
+    const choosePreset = async (): Promise<void> => {
+      const active = matchPreset(features())
+      const picked = await ctx.ui.dialog.select<string>({
+        title: "Sidebar",
+        placeholder: "Pick a preset, or Custom… for single switches",
+        current: active ?? "custom",
+        options: [
+          // the dialog marks `current` itself
+          ...PRESETS.map((p) => ({ title: p.title, value: p.id as string, description: p.description, category: "Presets" })),
+          { title: "Custom…", value: "custom", description: "Turn single sections, details and alerts on or off", category: "Presets" },
+          { title: "Reset to config defaults", value: "reset", category: "Reset", description: "Forget the preset and switches picked here" },
+        ],
+      })
+      if (picked === undefined) return
+      if (picked === "custom") return chooseFeatures()
+      if (picked === "reset") return void (await reset())
+      await updateToggles((draft) => {
+        draft.preset = picked as PresetID
+        draft.overrides = {}
+      }).catch(() => {})
     }
 
     // Re-opens after each pick so several switches can be flipped in one go.
@@ -79,16 +132,35 @@ const plugin: Plugin.Definition = {
         placeholder: "Filter, then enter to toggle",
         current,
         options: [
-          ...FEATURES.map((f) => ({ title: `${on(f.id) ? "●" : "○"} ${f.title}`, value: f.id, description: f.description, category: f.group })),
-          { title: "Reset to config defaults", value: "reset", category: "Reset", description: "Forget runtime toggles" },
+          ...FEATURES.map((f) => ({ title: `${on(f.id) ? "●" : "○"} ${f.title}`, value: f.id as string, description: f.description, category: f.group })),
+          { title: "Reset to config defaults", value: "reset", category: "Reset", description: "Forget the preset and switches picked here" },
         ],
       })
       if (picked === undefined) return
-      await updateToggles((draft) => {
-        if (picked === "reset") draft.overrides = {}
-        else draft.overrides[picked] = !on(picked as FeatureID)
-      }).catch(() => {})
+      if (picked === "reset") await reset()
+      else await updateToggles((draft) => void (draft.overrides[picked] = !on(picked as FeatureID))).catch(() => {})
       return chooseFeatures(picked)
+    }
+
+    // Toasts for sub-agents. OpenCode itself already plays its "subagent_done" /
+    // "error" / "permission" sounds for child sessions (opencode.notifications), but
+    // shows no toast for them and no desktop notification, so a child waiting on an
+    // approval is easy to miss. No extra sound here, so nothing pings twice.
+    const runs = new Map<string, number>()
+    const child = (sessionID: string) => {
+      const info = ctx.data.session.get(sessionID)
+      return info?.parentID ? info : undefined
+    }
+    const agentFinished = (sessionID: string, outcome: "succeeded" | "failed" | "interrupted", error?: string) => {
+      const info = child(sessionID)
+      const began = runs.get(sessionID)
+      runs.delete(sessionID)
+      if (!info || !on("alerts.agents")) return
+      const name = info.agent ?? "Sub-agent"
+      const took = began ? ` · ${formatDuration(Date.now() - began)}` : ""
+      const variant = outcome === "succeeded" ? "success" : outcome === "failed" ? "error" : "warning"
+      const verb = outcome === "succeeded" ? "finished" : outcome === "failed" ? "failed" : "was interrupted"
+      ctx.ui.toast.show({ variant, title: `${name} ${verb}`, message: `${truncate(error ?? info.title ?? "", 80)}${took}`, sessionID })
     }
 
     const cleanups = [
@@ -96,7 +168,7 @@ const plugin: Plugin.Definition = {
         prepend: "sidebar.content",
         render: (input) => (
           <box gap={1}>
-            <For each={options.sections.filter((id) => on(id))}>
+            <For each={sectionOrder(options.sections, on("subagents") && on("subagents.top") && hasAgents(ctx, input.sessionID)).filter((id) => on(id))}>
               {(id) =>
                 SECTION_VIEWS[id]({
                   shared,
@@ -113,10 +185,12 @@ const plugin: Plugin.Definition = {
       ctx.ui.slot({
         append: "sidebar.content",
         render: () => <box gap={1}>
-          <text
-            fg={audio.enabled ? ctx.theme.text.action.primary.selected ?? ctx.theme.text.action.primary.base : ctx.theme.text.muted}
-            onMouseUp={() => void toggleSound().catch(() => ctx.ui.toast.show({ variant: "error", message: "Could not save sound preference." }))}
-          >{`${audio.enabled ? "●" : "○"} Sidebar sound ${audio.enabled ? "on" : "off"}`}</text>
+          <Show when={on("sound")}>
+            <text
+              fg={audio.enabled ? ctx.theme.text.action.primary.selected ?? ctx.theme.text.action.primary.base : ctx.theme.text.muted}
+              onMouseUp={() => void toggleSound().catch(() => ctx.ui.toast.show({ variant: "error", message: "Could not save sound preference." }))}
+            >{`${audio.enabled ? "●" : "○"} Sidebar sound ${audio.enabled ? "on" : "off"}`}</text>
+          </Show>
           <Show when={on("details")}><DetailsHint shared={shared} /></Show>
         </box>,
       }),
@@ -183,11 +257,11 @@ const plugin: Plugin.Definition = {
               {
                 id: "sidebar-plus.features",
                 title: "Sidebar features",
-                description: "Turn sidebar sections, details and alerts on or off",
+                description: "Pick a sidebar preset (Minimal, Agents, Full) or single switches",
                 group: "Sidebar",
                 palette: true,
                 slash: { name: "sidebar" },
-                run: () => void chooseFeatures(),
+                run: () => void choosePreset(),
               },
             ],
           }))
@@ -205,6 +279,21 @@ const plugin: Plugin.Definition = {
         finish(event.data.id, typeof exit === "number" ? exit : 0, undefined)
       }),
       ctx.data.on("session.tool.failed", (event) => finish(event.data.id, undefined, event.data.error.message)),
+      ctx.data.on("session.execution.started", (event) => void runs.set(event.data.sessionID, event.created)),
+      ctx.data.on("session.execution.succeeded", (event) => agentFinished(event.data.sessionID, "succeeded")),
+      ctx.data.on("session.execution.interrupted", (event) => agentFinished(event.data.sessionID, "interrupted")),
+      ctx.data.on("session.execution.failed", (event) => agentFinished(event.data.sessionID, "failed", event.data.error.message)),
+      ctx.data.on("permission.asked", (event) => {
+        const info = child(event.data.sessionID)
+        if (!info || !on("alerts.agents")) return
+        const what = [event.data.action, ...event.data.resources.slice(0, 1)].join(" ")
+        ctx.ui.toast.show({
+          variant: "warning",
+          title: `${info.agent ?? "Sub-agent"} needs approval`,
+          message: `${truncate(what, 60)}. Answer the permission prompt, or click ${info.agent ?? "its row"} under Agents.`,
+          sessionID: event.data.sessionID,
+        })
+      }),
       ctx.data.on("shell.created", (event) => {
         const info = event.data.info
         const viaTool = [...started.values()].some((run) => run.command === info.command && Math.abs(run.at - info.time.started) < 10_000)
@@ -224,7 +313,10 @@ const plugin: Plugin.Definition = {
       }),
     ]
 
-    return () => cleanups.reverse().forEach((cleanup) => cleanup())
+    return () => {
+      cleanups.reverse().forEach((cleanup) => cleanup())
+      sessions.dispose()
+    }
   },
 }
 

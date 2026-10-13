@@ -1,52 +1,68 @@
 # opencode-sidebar-plus
 
-A sidebar for the [OpenCode](https://opencode.ai) **v2** terminal UI. It shows how full the context window is, the agent's to-do list, what it is doing right now, and anything that needs attention, without scrolling the transcript. Every section and every part of a section can be switched on or off.
+A sidebar for the [OpenCode](https://opencode.ai) **v2** terminal UI. It shows how full the context window is, the agent's to-do list, what it is doing right now, every sub-agent it has delegated to, and anything that needs attention, without scrolling the transcript. Pick a preset (Minimal, Agents, Full) or switch single sections and details on or off.
 
-**See what your agent is doing without losing your place in the conversation.**
+**See what your agent, and its sub-agents, are doing without losing your place in the conversation.**
 Use `/sidebar` to choose what appears and `/details` to inspect a run.
 
 ## In the terminal
 
 ![Sidebar Plus running in OpenCode with the Ayu Dark theme](docs/sidebar-example.png)
 
-*Real workshop screenshot. The Mistral error is a model-backend error surfaced
-by the sidebar, not a sidebar failure. Taken before the sound toggle below was added.*
+*Real workshop screenshot of v0.1 (Full layout, before the Agents section and
+presets). The Mistral error is a model-backend error surfaced by the sidebar, not
+a sidebar failure.*
+
+The default **Agents** layout while a coordinator waits on a sub-agent that is
+blocked on a permission prompt, then after the prompt was answered, then at the
+end (screen text captured from the real TUI with `scripts/tuirun.py`, OpenCode
+2.0.16, `opencode/big-pickle`):
 
 ```text
-▼ Context 5%
-  █░░░░░░░░░░░░░░░░░░░
-  9.2k / 200k · 191k free
-  in 159 · out 110 · cache 9k
-  ▁▁▁▁▁
-▼ Task list 1/3
-  ☑ Create data.csv with header i…
-  ◐ Run: sleep 15 && wc -l data.c…
-  ☐ Write summary.txt with the li…
-▼ Agent activity ● working 14s
-  Build
-  ✓ write data.csv
-  ✓ todo
-  ⟳ shell sleep 15 && wc -l data.…
-  5 tools
-▼ Terminal commands 1 running
-  ⟳ sleep 15 && wc -l data.csv 3s
-▼ Files 1 · ⎇ main
-  data.csv
-▼ Sub-agents 0
-  No delegated agents yet.
-● Sidebar sound on
-› Run details  /details
+▼ Agents 1 waiting
+  ◆ namer                   1m 11s
+    big-pickle · needs approval
+  ✓ counter                    14s
+    big-pickle · 17.9k
+▼ Agent activity ● working 1m 14s
+  coordinator
+  ✓ → counter: Count words in text
+  ⟳ → namer: Suggest nam… · 1m 11s
+  2 tools
 ```
 
-*Terminal-text illustration using the current labels; not a screenshot or a command to run.*
+```text
+▼ Agents 1 running
+  ● namer                   1m 14s
+    big-pickle · shell sleep 6
+  ✓ counter                    14s
+    big-pickle · 17.9k
+```
+
+```text
+▼ Agents 2/2 done
+  ✓ namer                   1m 25s
+    big-pickle · 15.8k
+  ✓ counter                    14s
+    big-pickle · 17.9k
+▼ Context 4%
+  █░░░░░░░░░░░░░░░░░░░
+▼ Agent activity ○ ready
+  coordinator
+  Waiting for your next message.
+  ✓ → counter: Count words in text
+  ✓ → namer: Suggest name for text
+  2 tools
+```
 
 The context bar uses your theme's selected-action accent normally, and the theme's
 warning/error colours near the limit. Completed tool calls remain readable
-instead of fading into the background. Empty task and subagent sections explain
-why there is nothing to show yet. Click `▼` / `▶` headings to collapse or expand,
-matching OpenCode's MCP disclosure arrows. Running and completed indicators use
-that same accent; pending items stay muted. Warning/error colours are reserved
-for actual warnings and failures. No RGB palette is hard-coded.
+instead of fading into the background. Sections with nothing to show (Task list,
+Terminal commands, Files, Agents) are hidden rather than printing placeholder
+lines. Click `▼` / `▶` headings to collapse or expand, matching OpenCode's MCP
+disclosure arrows. Sub-agent states use the theme's feedback colours: info for
+running, warning for waiting, success for done, error for failed (muted error for
+interrupted). No RGB palette is hard-coded.
 
 **Agent activity** is the selected agent's recent tool calls (reading files,
 searching, running commands, etc.). **Terminal commands** is the more detailed
@@ -56,21 +72,54 @@ Use `/sidebar` to hide either if you prefer a more compact view.
 
 Requires OpenCode **2.0.16 or later**. It does not work on OpenCode 1.x: v1 plugins use a different plugin format, so the two are incompatible in both directions.
 
-[Install](#install) · [Capabilities](#what-it-shows) · [Agents and subagents](#agents-and-subagents) · [Controls](#turning-things-on-and-off) · [Options](#options)
+[Install](#install) · [Capabilities](#what-it-shows) · [Agents](#agents) · [Controls](#turning-things-on-and-off) · [Options](#options)
 
-## Agents and subagents
+## Agents
 
-**Yes, you can see delegated subagents.** The Sub-agents section shows direct
-child sessions of the conversation you are viewing: agent name (when supplied
-by OpenCode), session title, running indicator and token count. Click a child
-to open its conversation. Up to five recent children are displayed; the running
-count covers all direct children. This is not a recursive swarm tree or a list
-of every installed agent. Open a child to inspect its own children.
+The **Agents** section is a live view of a multi-agent run: every sub-agent
+delegated from the conversation, and the sub-agents *they* delegated to, as an
+indented tree. It appears, at the top of the sidebar, as soon as the first
+sub-agent starts, and stays hidden in conversations without any.
 
-The other sections follow the **currently viewed session**. Your active primary
-agent and model are selected in OpenCode's existing UI; this plugin does not add
-a separate primary-agent selector. It observes delegation, it does not create
-agents or coordinate them. An empty section says “No delegated agents yet.”
+Each agent takes two lines:
+
+```text
+● genome-analyst            1m 05s     status · name · elapsed (live while running)
+  big-pickle · shell samto… · 9.1k     model · current tool or state · tokens · cost
+```
+
+| Glyph | Meaning |
+|---|---|
+| `●` | running (the second line shows the tool it is running, or "thinking") |
+| `◆` | **waiting**: a permission request ("needs approval") or a question ("needs input") is open for that agent |
+| `✓` | done |
+| `✗` | failed |
+| `⊘` | interrupted |
+
+- Running and waiting agents come first, newest first; then finished ones, most
+  recently finished first. Children follow their parent.
+- Every running or waiting agent is always listed. Finished ones are capped at
+  `agentsShown` (default 8) with a `+N more finished` line.
+- Elapsed time ticks while an agent runs and freezes at its final duration.
+- Tokens include cache reads/writes, matching the Context formula. Cost appears
+  when above $0. OpenCode adds a step's tokens to the session when the step
+  ends, so a sub-agent's count stays empty until its first step finishes.
+- Click an agent to open its conversation. In **Agent activity**, delegations read
+  `→ genome-analyst: <description>`, and clicking one also opens that sub-agent.
+- The tree is the whole family of the conversation you are viewing: opening a
+  sub-agent's conversation shows the same tree.
+
+**Waiting for approval.** A sub-agent that hits a permission prompt stops until
+someone answers it. The row turns `◆ needs approval` and a toast names the agent.
+In OpenCode 2.0.16 the parent conversation also shows the child's prompt at the
+bottom (`△ Permission required`), so it can be answered from there.
+
+Nested delegation (a sub-agent starting its own sub-agents) needs
+`"experimental": { "subagent_depth": 2 }` (or more) in `opencode.json`; the
+default depth of 1 rejects it with "Subagent depth limit reached".
+
+This plugin observes delegation; it does not create or coordinate agents. Your
+primary agent and model are chosen in OpenCode's own UI.
 
 ## At a glance
 
@@ -81,7 +130,7 @@ agents or coordinate them. An empty section says “No delegated agents yet.”
 | Is it making progress? | **Activity**: tools, duration, failures, retries and repeated-target warnings |
 | Is a command still running? | **Shells**: live timers, completed commands and exit codes |
 | What did it change? | **Files**: recorded writes, edits and patches, including code-mode operations |
-| What are its specialists doing? | **Sub-agents**: direct child sessions; click through to their conversations |
+| What are its specialists doing? | **Agents**: the whole sub-agent tree, live status, current tool, approvals; click through |
 | What happened over the whole run? | **Details**: per-turn statistics, context history and recent tool calls |
 
 Task lists are agent-reported, not proof of completion. Loop and truncation
@@ -97,7 +146,7 @@ not a filesystem audit: arbitrary shell writes are not automatically detected.
 | **Activity** | Whether the session is running or idle and for how long; the last few tool calls, with a live timer on the one running now; the total tool count and failures; retries; the last error; and a **loop warning** when the model keeps calling the same tool on the same target. |
 | **Shells** | Commands the agent ran, and background shells, each with a live timer, exit code and duration. |
 | **Files** | Files the agent wrote, edited or patched in this session, and the current git branch. |
-| **Sub-agents** | Child sessions with their status and token use. Click one to open it. |
+| **Agents** | The sub-agent tree: status (running, waiting for approval/input, done, failed, interrupted), model, elapsed time, current tool, tokens and cost. Click one to open it. See [Agents](#agents). |
 | **Details panel** | `/details` (or click `› details`) opens a full-width panel with context growth, a per-turn table (duration, steps, tools, failures, tokens) and the last 40 tool calls. |
 
 Click a section title to collapse it. The collapsed state is remembered across restarts.
@@ -107,9 +156,15 @@ Click a section title to collapse it. The collapsed state is remembered across r
 - a command that ran longer than `shellNotifyAfter` seconds has finished or failed (a desktop notification when the terminal is unfocused, plus a toast),
 - context has crossed `warnAt` or `dangerAt`,
 - the agent looks stuck in a loop,
-- the input looks truncated.
+- the input looks truncated,
+- a sub-agent finished, failed, was interrupted, or **needs approval** (a toast naming the agent; click it, or its row, to open it).
 
-The last three fire once per session, and only while that session is running.
+The context, loop and truncation alerts fire once per session, and only while that session is running.
+
+For sub-agents, OpenCode's built-in notifications (2.0.16) already play the
+`subagent_done`, `error` and `permission` sounds, but show no toast and no desktop
+notification for a child session. The plugin therefore adds toasts only, no
+sound, so nothing pings twice.
 
 **No ping?** Commands shorter than 20 seconds do not trigger the extra command
 alert by default. Session completion/permission alerts are handled by OpenCode
@@ -118,8 +173,9 @@ only while the terminal is unfocused; sound is requested regardless of focus.
 OpenCode's attention setting, terminal support, OS permissions and mute/Focus
 settings can still prevent delivery.
 
-Click **● Sidebar sound on / ○ Sidebar sound off** above Run details, or use
-`/sidebar-sound`, to toggle this plugin's command-alert and test sounds. The
+Click **● Sidebar sound on / ○ Sidebar sound off** above Run details (shown in
+the Full preset, or with the `sound` switch), or use `/sidebar-sound`, to toggle
+this plugin's command-alert and test sounds. The
 choice is saved across restarts; notifications and toasts remain enabled.
 This is a plugin mute switch, not an OS-volume indicator: it does not change
 OpenCode's own completion/permission sounds or override disabled host attention.
@@ -144,18 +200,31 @@ entries. `/details` opens the same view.
 
 ## Turning things on and off
 
-Run **`/sidebar`** (or pick "Sidebar features" from the command palette). You get a filterable list of every switch, grouped by section; press Enter on one to flip it (● on, ○ off). The sidebar updates immediately and your choices are remembered. "Reset to config defaults" forgets them.
+Run **`/sidebar`** (or pick "Sidebar features" from the command palette). It opens with three presets:
+
+| Preset | Shows |
+|---|---|
+| **Minimal** | Context bar and to-do list |
+| **Agents** (default) | Context bar, to-do list, Agents and Agent activity |
+| **Full** | Everything, including token numbers and breakdown, sparkline, terminal commands, files, the sound switch and the `› Run details` link |
+
+Alerts stay on in every preset; they only fire when something needs attention.
+**Custom…** opens the full list of switches, grouped by section; press Enter on one
+to flip it (● on, ○ off). The sidebar updates immediately and your choices are
+remembered. "Reset to config defaults" forgets the preset and switches picked
+in `/sidebar`.
 
 | Group | Switches |
 |---|---|
-| Sections | `context`, `todo`, `activity`, `shells`, `files`, `subagents`, `details` (the `› details` line) |
+| Sections | `context`, `todo`, `activity`, `shells`, `files`, `subagents` (Agents), `details` (the `› details` line), `sound` (the sound switch line) |
 | Context | `context.bar`, `context.numbers`, `context.breakdown`, `context.sparkline`, `context.compaction`, `context.truncation`, `context.cost` |
 | To-do | `todo.done` (keep completed and cancelled items visible) |
 | Activity | `activity.tools`, `activity.loop`, `activity.errors` |
 | Files | `files.branch` |
-| Alerts | `alerts.context`, `alerts.loop`, `alerts.truncation`, `alerts.commands` |
+| Agents | `subagents.top` (move Agents to the top while there are sub-agents) |
+| Alerts | `alerts.context`, `alerts.loop`, `alerts.truncation`, `alerts.commands`, `alerts.agents` |
 
-Everything starts switched on. To change the defaults, set `features` in the plugin options (next section). Choices made with `/sidebar` take precedence over those defaults.
+The defaults come from the `preset` option (Agents unless set). A preset or switch picked in `/sidebar` takes precedence over the config.
 
 ## Install
 
@@ -209,7 +278,38 @@ Then, in `~/.config/opencode/cli.json`, hide the built-in one-line Context widge
 
 Nothing needs building: OpenCode compiles the `.tsx` and `.ts` files itself. For a local folder, OpenCode loads `<folder>/tui.tsx` and `<folder>/server.ts` directly and ignores `package.json` `exports`, so keep both files at the root.
 
-You can also put or symlink the folder into `.opencode/plugins/` in a project, or into `~/.config/opencode/plugins/`, and OpenCode discovers it automatically. According to the OpenCode docs, changes in watched plugin folders reload without a restart. I haven't tested that with this plugin; if a change doesn't show up, restart the TUI.
+**Relative paths in a project.** A project `opencode.json` can point at a copy
+inside the repository with a `./` path, resolved against the project, not the
+directory you start OpenCode from. Both of these were checked on OpenCode 2.0.16
+(sidebar and `todo` tool loaded):
+
+```json
+{ "plugins": ["./vendor/sidebar-plus"] }
+```
+
+```json
+{ "plugins": ["./.opencode/plugins/sidebar-plus"] }
+```
+
+A folder in `.opencode/plugins/` is also discovered with no `plugins` entry at
+all, and listing it as well did not load it twice. The same discovery applies to
+`~/.config/opencode/plugins/`. According to the OpenCode docs, changes in watched
+plugin folders reload without a restart. I haven't tested that with this plugin;
+if a change doesn't show up, restart the TUI.
+
+**`opencode plugin add`** accepts only an npm package or a Git specifier, not a
+local path ("Plugin target must be an npm registry package or Git package
+specifier"). The package is not on npm. From GitHub,
+
+```sh
+opencode plugin add github:dskanakoglou/opencode-sidebar-plus
+```
+
+installs it under OpenCode's cache and adds `"github:dskanakoglou/opencode-sidebar-plus"`
+to `plugins` in the **global** `opencode.json` (checked with an isolated
+`XDG_CONFIG_HOME`); the TUI then loaded the sidebar from it. Without a ref it
+installs the default branch (`main`). `opencode plugin remove
+github:dskanakoglou/opencode-sidebar-plus` takes the entry out again.
 
 ## Options
 
@@ -217,8 +317,10 @@ You can also put or symlink the folder into `.opencode/plugins/` in a project, o
 
 | Option | Default | Meaning |
 |---|---|---|
-| `features` | all on | Default on/off for any switch listed above, e.g. `{ "context.cost": false }` |
-| `sections` | all, in the order shown | Section order. Sections you leave out start switched off; you can still turn them on with `/sidebar` |
+| `preset` | `"agents"` | Starting set of switches: `"minimal"`, `"agents"` or `"full"`. When unset but `sections` or `features` is given (a v0.1 config), the base is `"full"`, as it was in v0.1 |
+| `features` | per preset | Default on/off for any switch listed above, on top of the preset, e.g. `{ "context.cost": false }` |
+| `sections` | all, in the order shown | Section order. Sections you leave out start switched off; you can still turn them on with `/sidebar`. Agents moves to the top while there are sub-agents unless `subagents.top` is off |
+| `agentsShown` | `8` | Finished sub-agents listed before `+N more finished`; running and waiting ones are always listed |
 | `warnAt` | `70` | Context % at which the bar turns yellow and toasts |
 | `dangerAt` | `90` | Context % at which the bar turns red and toasts |
 | `compactionBuffer` | unset | Tokens reserved before auto-compaction. Set it to your `compaction.buffer` (for example `2048`) to show "compacts at …" |
@@ -233,7 +335,8 @@ You can also put or symlink the folder into `.opencode/plugins/` in a project, o
 
 - **The to-do tool costs context.** Its description and schema are sent with every request: about 170 tokens, measured with `opencode/big-pickle` as the difference between the same prompt with the tool on and off. That is small, but worth knowing on 16k-token windows; `{ "todo": false }` removes it. The tool is stateless: the agent sends its whole list on every call, and the sidebar shows the latest version from the session history. The list therefore survives restarts and needs no extra storage. The arguments follow the shape of v1's `todowrite` (`{ todos: [{ content, status }] }`), because models already know that shape. The sidebar also reads lists sent in slightly different forms, and lists sent from OpenCode's code mode (`execute`).
 - Context numbers use the same formula as the built-in widget: all token counts of the last assistant step, against the model's `limit.context`.
-- Everything stays inside OpenCode. The plugin reads data the TUI already has, sends nothing over the network, runs no programs, and writes only its UI state (collapsed sections and feature switches, under `~/.local/state/opencode/latest/tui/plugin.sidebar-plus.*.json`).
+- Everything stays inside OpenCode. The plugin reads data the TUI already has, sends nothing over the network, runs no programs, and writes only its UI state (collapsed sections, preset and feature switches, sound, under `~/.local/state/opencode/latest/tui/plugin.sidebar-plus.*.json`). For a running sub-agent it asks the TUI to load that session's messages and permission requests once; after that OpenCode keeps them current.
+- The sidebar is a fixed width (42 columns in OpenCode 2.0.16) and the plugin API does not report it, so rows are laid out for 32 columns. Agent rows use two lines so status, time and tokens are never cut; a long tool target is what gets shortened.
 
 ## Development
 
@@ -243,8 +346,8 @@ npm run check       # type-check against the @opencode/plugin 2.x types
 npm test            # node --test on the pure logic in src/derive.ts
 ```
 
-- `src/derive.ts` contains all of the logic as pure functions. Its tests use a trimmed recording of a real qwen3:8b session and shapes recorded from real runs.
-- `src/widgets.tsx` holds the views, `tui.tsx` the sidebar wiring, and `server.ts` the `todo` tool.
+- `src/derive.ts` contains all of the logic as pure functions, including `deriveAgents` (the sub-agent tree) and the presets. Its tests use a trimmed recording of a real qwen3:8b session and shapes recorded from real runs.
+- `src/widgets.tsx` holds the views and a per-session memo shared by every section (messages are sorted and tool calls extracted once per change), `tui.tsx` the sidebar wiring, and `server.ts` the `todo` tool.
 - `scripts/tuirun.py` drives the real TUI in a pseudo-terminal and prints the rendered screen as text. This is how the plugin was checked end to end. It needs `pip install pyte`, and setting `OPENCODE_CLI_CONFIG_CONTENT` lets you test a config without touching your own `cli.json`.
 
 ## Acknowledgements

@@ -1,11 +1,15 @@
 /** @jsxImportSource @opentui/solid */
-import { createEffect, createMemo, createSignal, For, onCleanup, Show, type JSX } from "solid-js"
+import { createEffect, createMemo, createRoot, createSignal, For, Index, onCleanup, Show, type Accessor, type JSX } from "solid-js"
 import type { Plugin } from "@opencode/plugin/tui"
 import type { RGBA } from "@opentui/core"
-import type { ShellInfo } from "@opencode/client"
+import type { ModelInfo, SessionInfo, SessionMessageInfo, ShellInfo } from "@opencode/client"
 import {
   activity,
+  agentLines,
   bar,
+  callText,
+  DELEGATE_TOOL,
+  deriveAgents,
   contextHistory,
   contextUsage,
   filesTouched,
@@ -18,8 +22,12 @@ import {
   todoFinished,
   todoList,
   todoSummary,
+  toolCalls,
   truncate,
   turns,
+  type AgentLive,
+  type AgentSession,
+  type AgentState,
   type FeatureID,
   type Options,
   type ToolCall,
@@ -28,6 +36,8 @@ import {
 type Context = Plugin.Context
 
 export const PANEL = "sidebar-plus.details"
+// The host sidebar is a fixed 42 columns (OpenCode 2.0.16) minus its own padding;
+// the slot API does not pass its width to plugins.
 const WIDTH = 32
 const BAR = 20
 
@@ -48,16 +58,64 @@ export type Shared = {
   once: (key: string) => boolean
   /** Background shells that already exited (the host store forgets them). */
   finishedShells: (directory: string | undefined) => ShellInfo[]
+  /** The shared, memoised view of one session (see sessionCache). */
+  session: (sessionID: string) => SessionView
+  /** Starts a store sync once per key for the plugin's lifetime. */
+  syncOnce: (key: string, sync: () => Promise<void>) => void
 }
 
-// One reactive view of a session, shared by every section.
-function useSession(shared: Shared, sessionID: () => string) {
-  const { data } = shared.ctx
-  const info = createMemo(() => data.session.get(sessionID()))
-  const messages = createMemo(() => timeline(data.session.message.list(sessionID()), info()?.revert?.messageID))
-  const models = createMemo(() => data.location.model.list(info()?.location))
-  const running = createMemo(() => data.session.status(sessionID()) === "running")
-  return { info, messages, models, running }
+export type SessionView = {
+  info: Accessor<SessionInfo | undefined>
+  /** Oldest-first, cut at a staged revert. */
+  messages: Accessor<SessionMessageInfo[]>
+  /** toolCalls(messages()), computed once and shared by every section. */
+  calls: Accessor<ToolCall[]>
+  models: Accessor<ModelInfo[] | undefined>
+  running: Accessor<boolean>
+}
+
+// One set of memos per session, shared by every section and by the Agents rows,
+// so the timeline is sorted and the tool calls are extracted once per change.
+// Least recently used views are dropped past `limit`.
+export function sessionCache(ctx: Context, limit = 64) {
+  const views = new Map<string, { view: SessionView; dispose: () => void }>()
+  const get = (sessionID: string): SessionView => {
+    const hit = views.get(sessionID)
+    if (hit) {
+      views.delete(sessionID)
+      views.set(sessionID, hit)
+      return hit.view
+    }
+    const entry = createRoot((dispose) => {
+      const { data } = ctx
+      const info = createMemo(() => data.session.get(sessionID))
+      const messages = createMemo(() => timeline(data.session.message.list(sessionID), info()?.revert?.messageID))
+      const calls = createMemo(() => toolCalls(messages()))
+      const models = createMemo(() => data.location.model.list(info()?.location))
+      const running = createMemo(() => data.session.status(sessionID) === "running")
+      return { view: { info, messages, calls, models, running }, dispose }
+    })
+    views.set(sessionID, entry)
+    if (views.size > limit) {
+      const [oldest, stale] = views.entries().next().value!
+      stale.dispose()
+      views.delete(oldest)
+    }
+    return entry.view
+  }
+  return { get, dispose: () => views.forEach((v) => v.dispose()) }
+}
+
+// The current session's shared view, following session switches.
+function useSession(shared: Shared, sessionID: () => string): SessionView {
+  const view = createMemo(() => shared.session(sessionID()))
+  return {
+    info: () => view().info(),
+    messages: () => view().messages(),
+    calls: () => view().calls(),
+    models: () => view().models(),
+    running: () => view().running(),
+  }
 }
 
 function useNow(active: () => boolean) {
@@ -183,21 +241,20 @@ export function TodoSection(props: { shared: Shared; sessionID: string }) {
   const { ctx, on } = props.shared
   const theme = ctx.theme
   const s = useSession(props.shared, () => props.sessionID)
-  const todo = createMemo(() => todoList(s.messages()))
+  const todo = createMemo(() => todoList(s.messages(), s.calls()))
   const visible = createMemo(() => (todo()?.items ?? []).filter((item) => on("todo.done") || !todoFinished(item)))
   const fg = (status: keyof typeof TODO_ICON) =>
     status === "in_progress" || status === "completed" ? accent(ctx) : theme.text.muted
 
   return (
+    <Show when={(todo()?.items.length ?? 0) > 0}>
       <Section shared={props.shared} id="todo" title="Task list" summary={todo() ? todoSummary(todo()!.items) : undefined}>
-        <Show when={!todo() || !todo()!.items.length}>
-          <Line fg={theme.text.muted}>No tasks recorded yet.</Line>
-        </Show>
         <For each={visible()}>{(item) => <Line fg={fg(item.status)}>{truncate(`${TODO_ICON[item.status]} ${item.text}`, WIDTH)}</Line>}</For>
-        <Show when={visible().length === 0 && (todo()?.items.length ?? 0) > 0}>
+        <Show when={visible().length === 0}>
           <Line fg={accent(ctx)}>{"☑ all done"}</Line>
         </Show>
       </Section>
+    </Show>
   )
 }
 
@@ -212,7 +269,7 @@ export function ActivitySection(props: { shared: Shared; sessionID: string }) {
   const { ctx, options, on } = props.shared
   const theme = ctx.theme
   const s = useSession(props.shared, () => props.sessionID)
-  const act = createMemo(() => activity(s.messages(), options))
+  const act = createMemo(() => activity(s.messages(), options, s.calls()))
   const now = useNow(s.running)
   const summary = () => (s.running() ? `● working ${formatDuration(now() - (act().turnStarted ?? now()))}` : "○ ready")
   createEffect(() => {
@@ -233,14 +290,17 @@ export function ActivitySection(props: { shared: Shared; sessionID: string }) {
         <Show when={!s.running()}><Line fg={theme.text.muted}>Waiting for your next message.</Line></Show>
         <Show when={s.running() && !act().current}><Line fg={theme.text.muted}>Generating a response…</Line></Show>
         <For each={on("activity.tools") ? act().recent : []}>
-          {(call) => (
-            <Line fg={toolColor(ctx, call.status)}>
-              {truncate(
-                `${ICON[call.status]} ${call.name} ${relativePath(call.label, s.info()?.location.directory)}${call.status === "running" || call.status === "streaming" ? ` · ${formatDuration(now() - call.started)}` : ""}`,
-                WIDTH,
-              )}
-            </Line>
-          )}
+          {(call) => {
+            const what = () => (call.name === DELEGATE_TOOL ? callText(call) : `${call.name} ${relativePath(call.label, s.info()?.location.directory)}`)
+            const live = () => (call.status === "running" || call.status === "streaming" ? ` · ${formatDuration(now() - call.started)}` : "")
+            // a delegation opens the sub-agent's session
+            const open = () => call.child && ctx.ui.router.navigate({ type: "session", sessionID: call.child })
+            return (
+              <text fg={toolColor(ctx, call.status)} onMouseUp={open}>
+                {`${truncate(`${ICON[call.status]} ${what()}`, WIDTH - live().length)}${live()}`}
+              </text>
+            )
+          }}
         </For>
         <Line fg={theme.text.muted}>{`${act().total} tool${act().total === 1 ? "" : "s"}${act().failed ? ` · ${act().failed} failed` : ""}`}</Line>
         <Show when={on("activity.loop") && act().loop}>
@@ -265,7 +325,7 @@ export function ShellsSection(props: { shared: Shared; sessionID: string }) {
     const loc = location()
     if (loc) ctx.data.shell.sync(loc).catch(() => {})
   })
-  const list = createMemo(() => commands(s.messages(), ctx.data.shell.list(location()), props.shared.finishedShells(location()?.directory), 4))
+  const list = createMemo(() => commands(s.messages(), ctx.data.shell.list(location()), props.shared.finishedShells(location()?.directory), 4, s.calls()))
   const runningCount = () => list().filter((c) => c.running).length
   const now = useNow(() => runningCount() > 0)
 
@@ -288,7 +348,7 @@ export function FilesSection(props: { shared: Shared; sessionID: string }) {
   const { ctx } = props.shared
   const theme = ctx.theme
   const s = useSession(props.shared, () => props.sessionID)
-  const files = createMemo(() => filesTouched(s.messages()))
+  const files = createMemo(() => filesTouched(s.messages(), s.calls()))
   const branch = createMemo(() => (props.shared.on("files.branch") ? ctx.data.location.vcs.info(s.info()?.location)?.branch.current : undefined))
   const summary = () => [files().length ? String(files().length) : "", branch() ? `⎇ ${branch()}` : ""].filter(Boolean).join(" · ")
 
@@ -306,34 +366,114 @@ export function FilesSection(props: { shared: Shared; sessionID: string }) {
   )
 }
 
+function agentColor(ctx: Context, state: AgentState): RGBA {
+  const t = ctx.theme.text
+  switch (state) {
+    case "running":
+      return t.feedback.info.base
+    case "waiting":
+      return t.feedback.warning.base
+    case "done":
+      return t.feedback.success.base
+    case "failed":
+      return t.feedback.error.base
+    case "interrupted":
+      return t.feedback.error.muted
+    default:
+      return t.muted
+  }
+}
+
+/** Every session in the family of `sessionID`, whatever the store knows. */
+function familySessions(ctx: Context, sessionID: string): { rootID: string; sessions: SessionInfo[] } {
+  const { session } = ctx.data
+  const rootID = session.root(sessionID)
+  const known = session.family(rootID).flatMap((id) => session.get(id) ?? [])
+  const listed = session.list().filter((s) => s.parentID && session.root(s.id) === rootID)
+  return { rootID, sessions: [...known, ...listed] }
+}
+
+/** Whether the session's family has any sub-agents. Reactive. */
+export function hasAgents(ctx: Context, sessionID: string): boolean {
+  const { rootID, sessions } = familySessions(ctx, sessionID)
+  return sessions.some((s) => s.id !== rootID && s.parentID)
+}
+
+// Kept under the `subagents` id so v0.1 configs (sections, features) still apply.
 export function SubagentsSection(props: { shared: Shared; sessionID: string }) {
-  const { ctx } = props.shared
+  const { ctx, options } = props.shared
   const theme = ctx.theme
-  const children = createMemo(() =>
-    ctx.data.session
-      .list()
-      .filter((child) => child.parentID === props.sessionID)
-      .sort((a, b) => b.time.created - a.time.created),
+  const { data } = ctx
+  const family = createMemo(() => familySessions(ctx, props.sessionID))
+  const descendants = createMemo(() => {
+    const { rootID, sessions } = family()
+    return [...new Set(sessions.filter((s) => s.id !== rootID && s.parentID).map((s) => s.id))]
+  })
+  const live = createMemo(() => {
+    const out: Record<string, AgentLive> = {}
+    for (const id of descendants()) {
+      const status = data.session.status(id)
+      const entry: AgentLive = {
+        status,
+        approvals: data.session.permission.list(id)?.length ?? 0,
+        questions: data.session.form.list(id)?.length ?? 0,
+      }
+      if (status === "running") {
+        const current = props.shared.session(id).calls().findLast((c) => c.status === "running" || c.status === "streaming")
+        if (current) entry.tool = { name: current.name, label: current.label }
+      }
+      out[id] = entry
+    }
+    return out
+  })
+  // Messages and permission requests of a child are loaded once, while it runs;
+  // after that the host keeps them current from events.
+  createEffect(() => {
+    for (const [id, entry] of Object.entries(live())) {
+      if (entry.status !== "running") continue
+      props.shared.syncOnce(`messages:${id}`, () => data.session.message.sync(id))
+      props.shared.syncOnce(`permissions:${id}`, () => data.session.permission.sync(id))
+    }
+  })
+  const active = createMemo(() => Object.values(live()).some((l) => l.status === "running" || l.approvals || l.questions))
+  const now = useNow(active)
+  const agents = createMemo(() =>
+    deriveAgents({ rootID: family().rootID, sessions: family().sessions as AgentSession[], live: live(), now: now(), finishedLimit: options.agentsShown }),
   )
-  const active = () => children().filter((child) => ctx.data.session.status(child.id) === "running").length
+  // while any run: what is in flight; afterwards: how it went
+  const summary = () => {
+    const a = agents()
+    if (a.running || a.waiting) return [a.running ? `${a.running} running` : "", a.waiting ? `${a.waiting} waiting` : ""].filter(Boolean).join(" · ")
+    return [`${a.done}/${a.total} done`, a.failed ? `${a.failed} failed` : "", a.interrupted ? `${a.interrupted} stopped` : ""].filter(Boolean).join(" · ")
+  }
+  const summaryFg = () => {
+    const a = agents()
+    return a.waiting ? theme.text.feedback.warning.base : !a.running && a.failed ? theme.text.feedback.error.base : accent(ctx)
+  }
 
   return (
-      <Section shared={props.shared} id="subagents" title="Sub-agents" summary={active() ? `${active()} running` : String(children().length)}>
-        <Show when={children().length === 0}><Line fg={theme.text.muted}>No delegated agents yet.</Line></Show>
-        <For each={children().slice(0, 5)}>
-          {(child) => {
-            const running = () => ctx.data.session.status(child.id) === "running"
-            const tokens = () => child.tokens.input + child.tokens.output + child.tokens.reasoning
+    <Show when={agents().total > 0}>
+      <Section shared={props.shared} id="subagents" title="Agents" summary={summary()} summaryFg={summaryFg()}>
+        <Index each={agents().rows}>
+          {(row) => {
+            const lines = () => agentLines(row(), WIDTH)
+            const detailFg = () => (row().state === "waiting" ? theme.text.feedback.warning.base : row().state === "failed" ? theme.text.feedback.error.base : theme.text.muted)
             return (
-              <box flexDirection="row" gap={1} onMouseUp={() => ctx.ui.router.navigate({ type: "session", sessionID: child.id })}>
-                <text fg={accent(ctx)}>{running() ? "●" : "○"}</text>
-                <text fg={theme.text.base}>{truncate(`${child.agent ?? "agent"} ${child.title ?? ""}`, WIDTH - 10)}</text>
-                <text fg={theme.text.muted}>{formatTokens(tokens())}</text>
+              <box onMouseUp={() => ctx.ui.router.navigate({ type: "session", sessionID: row().id })}>
+                <box flexDirection="row">
+                  <text fg={agentColor(ctx, row().state)}>{lines().glyph}</text>
+                  <text fg={row().id === props.sessionID ? accent(ctx) : theme.text.base}>{lines().rest}</text>
+                </box>
+                <text fg={detailFg()}>{lines().detail}</text>
               </box>
             )
           }}
-        </For>
+        </Index>
+        <Show when={agents().hidden > 0}>
+          <Line fg={theme.text.muted}>{`+${agents().hidden} more finished`}</Line>
+        </Show>
       </Section>
+    </Show>
   )
 }
 
@@ -353,7 +493,7 @@ export function DetailsPanel(props: { shared: Shared; input: { sessionID: string
   const list = createMemo(() => turns(s.messages()))
   const usage = createMemo(() => contextUsage(s.messages(), s.models(), options))
   const history = createMemo(() => contextHistory(s.messages()))
-  const calls = createMemo(() => activity(s.messages(), { ...options, recentTools: 40 }).recent)
+  const calls = createMemo(() => activity(s.messages(), { ...options, recentTools: 40 }, s.calls()).recent)
   const width = () => Math.max(40, props.input.width - 4)
 
   return (

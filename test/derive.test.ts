@@ -23,6 +23,14 @@ import {
   commands,
   timeline,
   turns,
+  agentLines,
+  agentState,
+  callText,
+  deriveAgents,
+  matchPreset,
+  presetFeatures,
+  sectionOrder,
+  type AgentSession,
   type ToolCall,
 } from "../src/derive.ts"
 
@@ -276,4 +284,174 @@ test("to-do called from code mode (execute), as recorded on OpenCode 2.0.16", ()
   const msgs = [user("u", 1), assistant("a", 2, { content: [tool("0", "todo", { items: [{ text: "old", status: "pending" }] }, "completed", 1), execute] })] as any
   assert.deepEqual(todoList(msgs)!.items.map((i) => i.status), ["completed", "in_progress"])
   assert.equal(toolCalls(msgs).at(-1)!.label, "→ todo")
+})
+
+// ---- Agents ---------------------------------------------------------------
+
+// Shape recorded from OpenCode 2.0.16 (coordinator delegating to two big-pickle subagents).
+const session = (id: string, parentID: string | undefined, extra: Partial<AgentSession> & { created?: number; idle?: number } = {}): AgentSession => ({
+  id,
+  parentID,
+  agent: id,
+  title: `${id} task`,
+  model: { id: "big-pickle", providerID: "opencode", variant: "default" },
+  cost: 0,
+  tokens: { input: 8988, output: 41, reasoning: 72, cache: { read: 8832, write: 0 } },
+  outcome: extra.idle !== undefined ? "succeeded" : undefined,
+  time: { created: extra.created ?? 1000, updated: extra.created ?? 1000, idle: extra.idle },
+  ...extra,
+})
+
+test("agents: recursive tree under the root, depth-first, root itself excluded", () => {
+  const sessions = [
+    session("root", undefined),
+    session("a", "root", { created: 10, idle: 50 }),
+    session("b", "root", { created: 20, idle: 90 }),
+    session("a1", "a", { created: 15, idle: 40 }),
+    session("other", "elsewhere", { created: 5 }),
+  ]
+  const { rows, total } = deriveAgents({ rootID: "root", sessions, live: {}, now: 100 })
+  assert.equal(total, 3)
+  // finished siblings: most recently finished first; children follow their parent
+  assert.deepEqual(rows.map((r) => [r.id, r.depth]), [["b", 1], ["a", 1], ["a1", 2]])
+  assert.equal(rows[0].elapsed, 70)
+})
+
+test("agents: running and waiting first, live elapsed, current tool only while active", () => {
+  const sessions = [
+    session("root", undefined),
+    session("old", "root", { created: 10, idle: 20 }),
+    session("run", "root", { created: 30 }),
+    session("ask", "root", { created: 40 }),
+  ]
+  const live = {
+    run: { status: "running" as const, tool: { name: "shell", label: "sleep 8" } },
+    ask: { status: "running" as const, approvals: 1 },
+    old: { status: "idle" as const, tool: { name: "read", label: "x" } },
+  }
+  const out = deriveAgents({ rootID: "root", sessions, live, now: 100 })
+  assert.deepEqual(out.rows.map((r) => r.id), ["ask", "run", "old"])
+  assert.equal(out.running, 1)
+  assert.equal(out.waiting, 1)
+  assert.equal(out.rows[1].elapsed, 70)
+  assert.equal(out.rows[1].tool?.label, "sleep 8")
+  assert.equal(out.rows[2].tool, undefined)
+})
+
+test("agents: status mapping from status, pending requests and SessionInfo.outcome", () => {
+  const s = (outcome?: "succeeded" | "failed" | "interrupted", idle?: number) => ({ ...session("x", "root", { idle }), outcome })
+  assert.deepEqual(agentState(s(), { status: "running" }), { state: "running" })
+  assert.deepEqual(agentState(s(), { status: "running", approvals: 2 }), { state: "waiting", waitingFor: "approval" })
+  assert.deepEqual(agentState(s(), { status: "running", questions: 1 }), { state: "waiting", waitingFor: "input" })
+  assert.deepEqual(agentState(s("failed", 5), { status: "idle" }), { state: "failed" })
+  assert.deepEqual(agentState(s("interrupted", 5), undefined), { state: "interrupted" })
+  assert.deepEqual(agentState(s("succeeded", 5), undefined), { state: "done" })
+  assert.deepEqual(agentState(s(undefined, 5), undefined), { state: "done" })
+  assert.deepEqual(agentState(s(), undefined), { state: "idle" })
+  const out = deriveAgents({ rootID: "root", sessions: [{ ...session("f", "root", { idle: 9 }), outcome: "failed" }, { ...session("i", "root", { idle: 8 }), outcome: "interrupted" }], live: {}, now: 10 })
+  assert.equal(out.failed, 1)
+  assert.equal(out.interrupted, 1)
+  // the status word is never cut: the model goes first
+  assert.equal(agentLines({ ...out.rows[1], depth: 2, tokens: 8888 }, 32).detail, "    interrupted · 8.9k")
+})
+
+test("agents: finished rows are capped, active rows and their ancestors never are", () => {
+  const sessions = [session("root", undefined)]
+  for (let i = 0; i < 12; i++) sessions.push(session(`done${i}`, "root", { created: i, idle: 100 + i }))
+  sessions.push(session("lead", "root", { created: 1, idle: 50 }))
+  sessions.push(session("deep", "lead", { created: 60 }))
+  for (let i = 0; i < 3; i++) sessions.push(session(`run${i}`, "root", { created: 200 + i }))
+  const live: Record<string, { status: "running" }> = { deep: { status: "running" } }
+  for (let i = 0; i < 3; i++) live[`run${i}`] = { status: "running" }
+  const out = deriveAgents({ rootID: "root", sessions, live, now: 300, finishedLimit: 4 })
+  const ids = out.rows.map((r) => r.id)
+  // all running agents, the finished parent of a running one, then the 4 most recent finished
+  for (const id of ["run0", "run1", "run2", "deep", "lead", "done11", "done10", "done9", "done8"]) assert.ok(ids.includes(id), id)
+  assert.equal(out.rows.length, 4 + 4 + 1)
+  assert.equal(out.hidden, out.total - out.rows.length)
+  assert.equal(out.total, 17)
+  // the finished parent of a running child sorts after the running siblings
+  assert.deepEqual(ids.slice(0, 3), ["run2", "run1", "run0"])
+  assert.equal(ids[ids.indexOf("lead") + 1], "deep")
+  // without a cap override the default is 8
+  assert.equal(deriveAgents({ rootID: "root", sessions, live: {}, now: 300 }).rows.length, 8)
+})
+
+test("agents: token totals include cache like the context formula, cost is carried", () => {
+  const [row] = deriveAgents({ rootID: "root", sessions: [session("a", "root", { idle: 5, cost: 0.0123 })], live: {}, now: 10 }).rows
+  assert.equal(row.tokens, 8988 + 41 + 72 + 8832)
+  assert.equal(row.cost, 0.0123)
+  assert.equal(row.model, "big-pickle")
+})
+
+test("agents: two-line rows fit the width and keep status, time and tokens", () => {
+  const [running] = deriveAgents({
+    rootID: "root",
+    sessions: [session("genome-analyst-with-a-long-name", "root", { created: 0 })],
+    live: { "genome-analyst-with-a-long-name": { status: "running", tool: { name: "shell", label: "samtools view -b aligned.sam > aligned.bam" } } },
+    now: 65_000,
+  }).rows
+  const lines = agentLines(running, 32)
+  assert.equal(lines.head.length, 32)
+  assert.ok(lines.head.startsWith("● genome-analyst"))
+  assert.ok(lines.head.endsWith("1m 05s"))
+  assert.ok(lines.detail.length <= 32)
+  assert.ok(lines.detail.startsWith("  big-pickle · shell s"), lines.detail)
+  assert.ok(lines.detail.endsWith("17.9k"))
+  const waiting = { ...running, state: "waiting" as const, waitingFor: "approval" as const, depth: 2 }
+  assert.ok(agentLines(waiting, 32).head.startsWith("  ◆ "))
+  assert.ok(agentLines(waiting, 32).detail.includes("needs approval"))
+  // no tokens recorded yet (the first step is still running): no stray "0"
+  const fresh = agentLines({ ...running, tokens: 0 }, 32).detail
+  assert.ok(!/ 0$/.test(fresh) && !fresh.endsWith("·"), fresh)
+  assert.equal(agentLines({ ...running, tokens: 0, state: "done", tool: undefined }, 32).detail, "  big-pickle")
+})
+
+test("delegation calls read as '→ agent: description' (subagent tool, OpenCode 2.0.16)", () => {
+  const call = {
+    type: "tool",
+    id: "call_00",
+    name: "subagent",
+    state: { status: "completed", input: { agent: "counter", description: "Count words in text", prompt: "Count the words" }, content: [], metadata: { sessionID: "ses_child", status: "completed", truncated: false } },
+    time: { created: 1, ran: 2, completed: 3 },
+  }
+  const [parsed] = toolCalls([user("u", 1), assistant("a", 2, { content: [call] })] as any)
+  assert.equal(parsed.label, "counter: Count words in text")
+  assert.equal(parsed.child, "ses_child")
+  assert.equal(callText(parsed), "→ counter: Count words in text")
+  assert.equal(callText({ name: "shell", label: "ls" }), "shell ls")
+})
+
+test("presets: Agents is the default; Minimal and Full; legacy configs keep everything on", () => {
+  assert.equal(DEFAULT_OPTIONS.preset, "agents")
+  assert.equal(matchPreset(DEFAULT_OPTIONS.features), "agents")
+  const agents = presetFeatures("agents")
+  for (const id of ["context", "context.bar", "todo", "subagents", "activity", "alerts.agents"] as const) assert.equal(agents[id], true, id)
+  for (const id of ["shells", "files", "details", "sound", "context.sparkline"] as const) assert.equal(agents[id], false, id)
+  const minimal = presetFeatures("minimal")
+  assert.deepEqual(FEATURES.filter((f) => minimal[f.id] && f.group !== "Alerts").map((f) => f.id), ["context", "todo", "context.bar", "todo.done"])
+  assert.ok(FEATURES.every((f) => presetFeatures("full")[f.id]))
+  assert.equal(readOptions({ preset: "minimal" }).features.activity, false)
+  assert.equal(readOptions({ preset: "bogus" }).preset, "agents")
+  // v0.1 configs that customised sections/features were written against "all on"
+  assert.equal(readOptions({ features: { "context.cost": false } }).features.shells, true)
+  assert.equal(readOptions({ sections: ["todo"] }).features["context.sparkline"], true)
+  assert.equal(readOptions({ preset: "agents", features: { shells: true } }).features.files, false)
+  // a preset picked at runtime replaces the config defaults; toggles still win
+  assert.equal(resolveFeatures(DEFAULT_OPTIONS.features, {}, "full").files, true)
+  assert.equal(resolveFeatures(DEFAULT_OPTIONS.features, { files: false }, "full").files, false)
+  assert.equal(resolveFeatures(DEFAULT_OPTIONS.features, {}, "").files, false)
+})
+
+test("Agents section moves to the top only while there are sub-agents", () => {
+  const order = readOptions({}).sections
+  assert.equal(sectionOrder(order, false)[0], "context")
+  assert.deepEqual(sectionOrder(order, true), ["subagents", "context", "todo", "activity", "shells", "files"])
+})
+
+test("tool calls carry the shell exit code; commands use it", () => {
+  const completed = { ...tool("t", "shell", { command: "make" }), state: { status: "completed", input: { command: "make" }, content: [], metadata: { exit: 2 } } }
+  const msgs = [user("u", 1), assistant("a", 2, { content: [completed] })] as any
+  assert.equal(toolCalls(msgs)[0].exit, 2)
+  assert.equal(commands(msgs, [], [], 5, toolCalls(msgs))[0].status, "exit 2")
 })

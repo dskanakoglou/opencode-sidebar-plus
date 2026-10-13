@@ -1,6 +1,6 @@
 // Pure derivations over OpenCode v2 session data. No UI, no host APIs, so these
 // run under `node --test` against recorded fixtures.
-import type { ModelInfo, SessionMessageInfo, ShellInfo, TokenUsageInfo } from "@opencode/client"
+import type { ModelInfo, SessionInfo, SessionMessageInfo, ShellInfo, TokenUsageInfo } from "@opencode/client"
 
 type Message = SessionMessageInfo
 type Assistant = Extract<Message, { type: "assistant" }>
@@ -10,15 +10,17 @@ export const SECTIONS = ["context", "todo", "activity", "shells", "files", "suba
 export type SectionID = (typeof SECTIONS)[number]
 
 // Every switch the user can flip, in config (`features`) or at runtime (/sidebar).
-// All default to on. Section switches share their id with the section.
+// Which are on by default depends on the preset (see PRESETS). Section switches
+// share their id with the section.
 export const FEATURES = [
   { id: "context", group: "Sections", title: "Context", description: "Context window usage" },
   { id: "todo", group: "Sections", title: "Task list", description: "The agent's to-do list (needs the server half of the plugin)" },
   { id: "activity", group: "Sections", title: "Agent activity", description: "Current agent, running/ready, recent tool calls, warnings" },
   { id: "shells", group: "Sections", title: "Terminal commands", description: "Commands the agent ran, exit codes and durations" },
   { id: "files", group: "Sections", title: "Files", description: "Files written or edited this session" },
-  { id: "subagents", group: "Sections", title: "Sub-agents", description: "Child sessions" },
+  { id: "subagents", group: "Sections", title: "Agents", description: "Delegated sub-agents: status, model, time, current tool, tokens" },
   { id: "details", group: "Sections", title: "Details link", description: "The '› details' line under the sidebar" },
+  { id: "sound", group: "Sections", title: "Sound switch", description: "The '● Sidebar sound on' line under the sidebar" },
   { id: "context.bar", group: "Context", title: "Usage bar", description: "Coloured bar" },
   { id: "context.numbers", group: "Context", title: "Used / limit / free", description: "Token counts against the window" },
   { id: "context.breakdown", group: "Context", title: "Token breakdown", description: "Input, output, reasoning, cache" },
@@ -31,16 +33,45 @@ export const FEATURES = [
   { id: "activity.loop", group: "Activity", title: "Loop warning", description: "Same tool on the same target, again and again" },
   { id: "activity.errors", group: "Activity", title: "Errors and retries", description: "Last error and provider retries" },
   { id: "files.branch", group: "Files", title: "Git branch", description: "Current branch next to the file count" },
+  { id: "subagents.top", group: "Agents", title: "Move to top", description: "Show Agents first while there are sub-agents" },
   { id: "alerts.context", group: "Alerts", title: "Context threshold toast", description: "When usage crosses warnAt / dangerAt" },
   { id: "alerts.loop", group: "Alerts", title: "Loop toast", description: "When the agent seems stuck" },
   { id: "alerts.truncation", group: "Alerts", title: "Truncation toast", description: "When input looks truncated" },
   { id: "alerts.commands", group: "Alerts", title: "Long command finished", description: "Notification + toast after shellNotifyAfter seconds" },
+  { id: "alerts.agents", group: "Alerts", title: "Sub-agent toasts", description: "When a sub-agent finishes, fails or waits for approval" },
 ] as const
 export type FeatureID = (typeof FEATURES)[number]["id"]
 export type Features = Record<FeatureID, boolean>
 
 const FEATURE_IDS = new Set<string>(FEATURES.map((f) => f.id))
 const ALERT_TOASTS: FeatureID[] = ["alerts.context", "alerts.loop", "alerts.truncation"]
+
+// One-click starting points for /sidebar and the `preset` option. Alerts stay on
+// in every preset: they only fire when something needs attention.
+export const PRESETS = [
+  { id: "minimal", title: "Minimal", description: "Context bar and to-do list" },
+  { id: "agents", title: "Agents", description: "Context bar, to-do list, agents and activity (default)" },
+  { id: "full", title: "Full", description: "Everything" },
+] as const
+export type PresetID = (typeof PRESETS)[number]["id"]
+const PRESET_IDS = new Set<string>(PRESETS.map((p) => p.id))
+export const DEFAULT_PRESET: PresetID = "agents"
+
+const PRESET_ON: Record<PresetID, readonly FeatureID[] | "all"> = {
+  minimal: ["context", "context.bar", "todo", "todo.done"],
+  agents: ["context", "context.bar", "todo", "todo.done", "subagents", "subagents.top", "activity", "activity.tools", "activity.loop", "activity.errors"],
+  full: "all",
+}
+
+export function presetFeatures(preset: PresetID): Features {
+  const on = PRESET_ON[preset]
+  return Object.fromEntries(FEATURES.map((f) => [f.id, on === "all" || f.group === "Alerts" || on.includes(f.id)])) as Features
+}
+
+/** The preset whose switches match exactly, if any. */
+export function matchPreset(features: Features): PresetID | undefined {
+  return PRESETS.find((p) => FEATURES.every((f) => presetFeatures(p.id)[f.id] === features[f.id]))?.id
+}
 
 export type Options = {
   warnAt: number
@@ -50,11 +81,13 @@ export type Options = {
   loopThreshold: number
   shellNotifyAfter: number
   sections: SectionID[]
+  /** Finished sub-agents listed before "+N more" (running ones are always listed). */
+  agentsShown: number
+  /** The preset the config defaults start from. */
+  preset: PresetID
   /** Defaults from config; runtime toggles are layered on top by `resolveFeatures`. */
   features: Features
 }
-
-const ALL_ON = Object.fromEntries(FEATURES.map((f) => [f.id, true])) as Features
 
 export const DEFAULT_OPTIONS: Options = {
   warnAt: 70,
@@ -63,7 +96,9 @@ export const DEFAULT_OPTIONS: Options = {
   loopThreshold: 3,
   shellNotifyAfter: 20,
   sections: [...SECTIONS],
-  features: ALL_ON,
+  agentsShown: 8,
+  preset: DEFAULT_PRESET,
+  features: presetFeatures(DEFAULT_PRESET),
 }
 
 export function readOptions(raw: Readonly<Record<string, any>> | undefined): Options {
@@ -74,10 +109,15 @@ export function readOptions(raw: Readonly<Record<string, any>> | undefined): Opt
   // `sections` sets the order; sections it leaves out start switched off.
   const listed = Array.isArray(raw?.sections) ? raw.sections.filter((s: unknown): s is SectionID => SECTIONS.includes(s as SectionID)) : undefined
   const sections = listed ? [...listed, ...SECTIONS.filter((s) => !listed.includes(s))] : [...SECTIONS]
-  const features = { ...ALL_ON }
+  const configured = pickFeatures(raw?.features)
+  // v0.1 configs that customised `sections` or `features` were written against
+  // "everything on"; keep that base for them unless they name a preset.
+  const legacy = listed !== undefined || Object.keys(configured).length > 0
+  const preset: PresetID = PRESET_IDS.has(raw?.preset) ? raw!.preset : legacy ? "full" : DEFAULT_PRESET
+  const features = presetFeatures(preset)
   if (listed) for (const s of SECTIONS) features[s] = listed.includes(s)
   if (raw?.toasts === false) for (const id of ALERT_TOASTS) features[id] = false
-  Object.assign(features, pickFeatures(raw?.features))
+  Object.assign(features, configured)
   return {
     warnAt: num("warnAt", DEFAULT_OPTIONS.warnAt)!,
     dangerAt: num("dangerAt", DEFAULT_OPTIONS.dangerAt)!,
@@ -86,6 +126,8 @@ export function readOptions(raw: Readonly<Record<string, any>> | undefined): Opt
     loopThreshold: Math.max(2, num("loopThreshold", DEFAULT_OPTIONS.loopThreshold)!),
     shellNotifyAfter: num("shellNotifyAfter", DEFAULT_OPTIONS.shellNotifyAfter)!,
     sections,
+    agentsShown: num("agentsShown", DEFAULT_OPTIONS.agentsShown)!,
+    preset,
     features,
   }
 }
@@ -95,8 +137,15 @@ function pickFeatures(raw: unknown): Partial<Features> {
   return Object.fromEntries(Object.entries(raw).filter(([id, on]) => FEATURE_IDS.has(id) && typeof on === "boolean")) as Partial<Features>
 }
 
-export function resolveFeatures(defaults: Features, runtime: Readonly<Record<string, unknown>> | undefined): Features {
-  return { ...defaults, ...pickFeatures(runtime) }
+/** Config defaults, or a preset picked at runtime, with runtime toggles on top. */
+export function resolveFeatures(defaults: Features, runtime: Readonly<Record<string, unknown>> | undefined, preset?: unknown): Features {
+  const base = typeof preset === "string" && PRESET_IDS.has(preset) ? presetFeatures(preset as PresetID) : defaults
+  return { ...base, ...pickFeatures(runtime) }
+}
+
+/** Section order: the configured order, with Agents first while there are sub-agents. */
+export function sectionOrder(sections: readonly SectionID[], agentsFirst: boolean): SectionID[] {
+  return agentsFirst ? ["subagents", ...sections.filter((s) => s !== "subagents")] : [...sections]
 }
 
 // The API returns messages newest-first; the store may not. Normalise to oldest-first
@@ -181,7 +230,15 @@ export type ToolCall = {
   input: unknown
   /** Tools called from inside a code-mode `execute` call, as the host records them. */
   nested: { tool: string; status: string; input: unknown }[]
+  /** Shell exit code (state.metadata.exit), when recorded. */
+  exit?: number
+  /** Child session started by a delegation (`subagent`) call (state.metadata.sessionID). */
+  child?: string
 }
+
+// OpenCode v2's delegation tool. Input { agent, description, prompt, sessionID? (continue),
+// model? }; the child session id is in state.metadata.sessionID (recorded on 2.0.16).
+export const DELEGATE_TOOL = "subagent"
 
 const LABEL_KEYS = ["path", "command", "pattern", "url", "query", "agent", "description", "id", "prompt"]
 
@@ -208,22 +265,46 @@ function nestedCalls(part: ToolPart): ToolCall["nested"] {
   })
 }
 
+const text = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : undefined)
+
+function delegationLabel(input: unknown): string | undefined {
+  if (!input || typeof input !== "object") return
+  const record = input as Record<string, unknown>
+  const agent = text(record.agent) ?? text(record.subagent_type)
+  const what = text(record.description) ?? text(record.prompt)?.split("\n")[0]
+  if (!agent && !what) return
+  return `${agent ?? (text(record.sessionID) ? "continue" : "agent")}${what ? `: ${what}` : ""}`
+}
+
 export function toolCalls(messages: readonly Message[]): ToolCall[] {
   return assistants(messages).flatMap((m) =>
     m.content
       .filter((c): c is ToolPart => c.type === "tool")
-      .map((c) => ({
-        id: c.id,
-        name: c.name,
-        label: nestedCalls(c).length ? `→ ${[...new Set(nestedCalls(c).map((n) => n.tool))].join(", ")}` : toolLabel(c.state.input),
-        nested: nestedCalls(c),
-        status: c.state.status,
-        started: c.time.ran ?? c.time.created,
-        ended: c.time.completed,
-        error: c.state.status === "error" ? c.state.error.message : undefined,
-        input: c.state.input,
-      })),
+      .map((c): ToolCall => {
+        const nested = nestedCalls(c)
+        const metadata = c.state.status === "streaming" ? undefined : c.state.metadata
+        const delegation = c.name === DELEGATE_TOOL ? delegationLabel(c.state.input) : undefined
+        return {
+          id: c.id,
+          name: c.name,
+          label: nested.length ? `→ ${[...new Set(nested.map((n) => n.tool))].join(", ")}` : (delegation ?? toolLabel(c.state.input)),
+          nested,
+          status: c.state.status,
+          started: c.time.ran ?? c.time.created,
+          ended: c.time.completed,
+          error: c.state.status === "error" ? c.state.error.message : undefined,
+          input: c.state.input,
+          exit: typeof metadata?.exit === "number" ? metadata.exit : undefined,
+          child: typeof metadata?.sessionID === "string" ? metadata.sessionID : undefined,
+        }
+      }),
   )
+}
+
+/** One-line description of a call: "→ genome-analyst: Align reads" for delegations. */
+export function callText(call: Pick<ToolCall, "name" | "label">): string {
+  if (call.name === DELEGATE_TOOL) return `→ ${call.label || "sub-agent"}`
+  return call.label ? `${call.name} ${call.label}` : call.name
 }
 
 export type Activity = {
@@ -237,8 +318,7 @@ export type Activity = {
   turnStarted?: number
 }
 
-export function activity(messages: readonly Message[], options: Options): Activity {
-  const calls = toolCalls(messages)
+export function activity(messages: readonly Message[], options: Pick<Options, "recentTools" | "loopThreshold">, calls: readonly ToolCall[] = toolCalls(messages)): Activity {
   const current = calls.findLast((c) => c.status === "running" || c.status === "streaming")
   const lastUser = messages.findLast((m) => m.type === "user")
   const lastAssistant = assistants(messages).at(-1)
@@ -313,9 +393,9 @@ export function normalizeTodos(input: unknown): TodoItem[] | undefined {
 
 // The agent sends its whole list on every call, so the latest successful call is the state.
 // Called directly, or from inside code mode (`execute`); both count.
-export function todoList(messages: readonly Message[]): { items: TodoItem[]; updated: number } | undefined {
+export function todoList(messages: readonly Message[], calls: readonly ToolCall[] = toolCalls(messages)): { items: TodoItem[]; updated: number } | undefined {
   const isTodo = (name: string) => name === TODO_TOOL || name.endsWith(`_${TODO_TOOL}`)
-  for (const call of toolCalls(messages).reverse()) {
+  for (const call of [...calls].reverse()) {
     if (call.status !== "completed") continue
     const input = isTodo(call.name) ? call.input : call.nested.findLast((n) => isTodo(n.tool) && n.status === "completed")?.input
     const items = input === undefined ? undefined : normalizeTodos(input)
@@ -334,7 +414,7 @@ const PATCH_FILE = /^\*\*\* (?:Add|Update|Delete) File: (.+)$/gm
 
 export type FileTouch = { path: string; writes: number; last: number }
 
-export function filesTouched(messages: readonly Message[]): FileTouch[] {
+export function filesTouched(messages: readonly Message[], calls: readonly ToolCall[] = toolCalls(messages)): FileTouch[] {
   const files = new Map<string, FileTouch>()
   const touch = (path: string, at: number) => {
     const entry = files.get(path) ?? { path, writes: 0, last: 0 }
@@ -342,7 +422,7 @@ export function filesTouched(messages: readonly Message[]): FileTouch[] {
     entry.last = Math.max(entry.last, at)
     files.set(path, entry)
   }
-  for (const call of toolCalls(messages)) {
+  for (const call of calls) {
     // Nested tools can succeed before their enclosing execute call fails.
     const operations = call.nested.length ? call.nested : [{ tool: call.name, status: call.status, input: call.input }]
     for (const operation of operations) {
@@ -371,11 +451,17 @@ export type Command = {
 // Commands the agent ran via the shell tool, plus background shells. The TUI store
 // drops background shells as soon as they exit, so finished ones come from the
 // plugin's own record (`finished`).
-export function commands(messages: readonly Message[], background: readonly ShellInfo[] | undefined, finished: readonly ShellInfo[], limit: number): Command[] {
-  const fromTools: Command[] = toolCalls(messages)
+export function commands(
+  messages: readonly Message[],
+  background: readonly ShellInfo[] | undefined,
+  finished: readonly ShellInfo[],
+  limit: number,
+  calls: readonly ToolCall[] = toolCalls(messages),
+): Command[] {
+  const fromTools: Command[] = calls
     .filter((c) => c.name === "shell" && c.label)
     .map((c) => {
-      const exit = exitCode(messages, c.id)
+      const exit = c.status === "completed" ? c.exit : undefined
       const running = c.status === "running" || c.status === "streaming"
       const ok = c.status === "completed" && (exit ?? 0) === 0
       return { id: c.id, command: c.label, running, ok, status: running ? "running" : c.status === "error" ? "error" : `exit ${exit ?? 0}`, started: c.started, ended: c.ended }
@@ -395,15 +481,6 @@ export function commands(messages: readonly Message[], background: readonly Shel
   const running = unique.filter((c) => c.running).sort((a, b) => b.started - a.started)
   const done = unique.filter((c) => !c.running).sort((a, b) => (b.ended ?? b.started) - (a.ended ?? a.started))
   return [...running, ...done].slice(0, Math.max(limit, running.length))
-}
-
-function exitCode(messages: readonly Message[], toolID: string): number | undefined {
-  for (const m of assistants(messages))
-    for (const c of m.content)
-      if (c.type === "tool" && c.id === toolID && c.state.status === "completed") {
-        const exit = c.state.metadata?.exit
-        return typeof exit === "number" ? exit : undefined
-      }
 }
 
 export type Turn = {
@@ -480,4 +557,196 @@ export function relativePath(path: string, directory: string | undefined): strin
   if (!directory) return path
   const base = directory.endsWith("/") ? directory : `${directory}/`
   return path.startsWith(base) ? path.slice(base.length) : path
+}
+
+// ---------------------------------------------------------------------------
+// Agents: the delegation tree under the root session.
+
+export type AgentSession = Pick<SessionInfo, "id" | "parentID" | "agent" | "title" | "model" | "cost" | "tokens" | "outcome"> & {
+  time: Pick<SessionInfo["time"], "created" | "updated" | "idle">
+}
+
+/** What the TUI store knows about a session right now, beyond its info. */
+export type AgentLive = {
+  status?: "idle" | "running"
+  /** Pending permission requests (data.session.permission.list). */
+  approvals?: number
+  /** Pending forms/questions (data.session.form.list). */
+  questions?: number
+  /** The tool call in flight, for running sessions. */
+  tool?: Pick<ToolCall, "name" | "label">
+}
+
+export type AgentState = "running" | "waiting" | "done" | "failed" | "interrupted" | "idle"
+
+export type AgentRow = {
+  id: string
+  parentID?: string
+  depth: number
+  agent: string
+  title?: string
+  /** Short model id, e.g. "big-pickle". */
+  model?: string
+  state: AgentState
+  waitingFor?: "approval" | "input"
+  started: number
+  ended?: number
+  elapsed: number
+  tool?: Pick<ToolCall, "name" | "label">
+  tokens: number
+  cost: number
+}
+
+export type Agents = {
+  rows: AgentRow[]
+  /** Finished agents left out by the cap. */
+  hidden: number
+  total: number
+  running: number
+  waiting: number
+  failed: number
+  interrupted: number
+  done: number
+}
+
+export const isActive = (state: AgentState) => state === "running" || state === "waiting"
+
+export function agentState(session: AgentSession, live: AgentLive | undefined): Pick<AgentRow, "state" | "waitingFor"> {
+  // An open permission request or question stalls the agent whatever its status says.
+  if (live?.approvals) return { state: "waiting", waitingFor: "approval" }
+  if (live?.questions) return { state: "waiting", waitingFor: "input" }
+  if (live?.status === "running") return { state: "running" }
+  if (session.outcome === "failed") return { state: "failed" }
+  if (session.outcome === "interrupted") return { state: "interrupted" }
+  if (session.outcome === "succeeded" || session.time.idle !== undefined) return { state: "done" }
+  return { state: "idle" }
+}
+
+/**
+ * Every descendant of `rootID`, depth-first. Siblings: active (running or waiting)
+ * first, newest first; then finished, most recently finished first. Active agents
+ * and their ancestors are always listed; at most `finishedLimit` other rows are.
+ */
+export function deriveAgents(input: {
+  rootID: string
+  sessions: readonly AgentSession[]
+  live: Readonly<Record<string, AgentLive | undefined>>
+  now: number
+  finishedLimit?: number
+}): Agents {
+  const byParent = new Map<string, AgentSession[]>()
+  for (const s of new Map(input.sessions.map((s) => [s.id, s])).values()) {
+    if (!s.parentID || s.id === input.rootID) continue
+    byParent.set(s.parentID, [...(byParent.get(s.parentID) ?? []), s])
+  }
+  const rows = new Map<string, AgentRow>()
+  const order: string[] = []
+  const visit = (parentID: string, depth: number) => {
+    const children = (byParent.get(parentID) ?? []).map((s) => toRow(s, depth, input.live[s.id], input.now))
+    children.sort((a, b) => Number(isActive(b.state)) - Number(isActive(a.state)) || recency(b) - recency(a) || a.id.localeCompare(b.id))
+    for (const row of children) {
+      if (rows.has(row.id)) continue // guards against parent cycles
+      rows.set(row.id, row)
+      order.push(row.id)
+      visit(row.id, depth + 1)
+    }
+  }
+  visit(input.rootID, 1)
+
+  const all = order.map((id) => rows.get(id)!)
+  const shown = new Set<string>()
+  const withAncestors = (row: AgentRow) => {
+    for (let r: AgentRow | undefined = row; r && !shown.has(r.id); r = r.parentID ? rows.get(r.parentID) : undefined) shown.add(r.id)
+  }
+  all.filter((r) => isActive(r.state)).forEach(withAncestors)
+  const limit = Math.max(0, input.finishedLimit ?? DEFAULT_OPTIONS.agentsShown)
+  const finished = all.filter((r) => !isActive(r.state)).sort((a, b) => recency(b) - recency(a))
+  // finished ancestors of active agents are context, not part of the budget
+  let used = 0
+  for (const row of finished) {
+    if (shown.has(row.id)) continue
+    const extra = ancestry(row, rows).filter((r) => !shown.has(r.id)).length
+    if (used + extra > limit) continue
+    used += extra
+    withAncestors(row)
+  }
+  const count = (state: AgentState) => all.filter((r) => r.state === state).length
+  return {
+    rows: all.filter((r) => shown.has(r.id)),
+    hidden: all.length - shown.size,
+    total: all.length,
+    running: count("running"),
+    waiting: count("waiting"),
+    failed: count("failed"),
+    interrupted: count("interrupted"),
+    done: count("done"),
+  }
+}
+
+const recency = (row: AgentRow) => (isActive(row.state) ? row.started : (row.ended ?? row.started))
+
+function ancestry(row: AgentRow, rows: ReadonlyMap<string, AgentRow>): AgentRow[] {
+  const chain: AgentRow[] = []
+  for (let r: AgentRow | undefined = row; r; r = r.parentID ? rows.get(r.parentID) : undefined) chain.push(r)
+  return chain
+}
+
+function toRow(session: AgentSession, depth: number, live: AgentLive | undefined, now: number): AgentRow {
+  const { state, waitingFor } = agentState(session, live)
+  const started = session.time.created
+  const ended = isActive(state) || state === "idle" ? undefined : (session.time.idle ?? session.time.updated)
+  return {
+    id: session.id,
+    parentID: session.parentID,
+    depth,
+    agent: session.agent ?? "agent",
+    title: session.title,
+    model: session.model?.id,
+    state,
+    waitingFor,
+    started,
+    ended,
+    elapsed: Math.max(0, (ended ?? now) - started),
+    tool: isActive(state) ? live?.tool : undefined,
+    tokens: tokenTotal(session.tokens),
+    cost: session.cost ?? 0,
+  }
+}
+
+export const AGENT_GLYPH: Record<AgentState, string> = { running: "●", waiting: "◆", done: "✓", failed: "✗", interrupted: "⊘", idle: "○" }
+
+export function formatCost(cost: number): string {
+  return `$${cost.toFixed(cost < 1 ? 3 : 2)}`
+}
+
+/**
+ * The two lines of an agent row, each at most `width` columns:
+ *   ● genome-analyst          1m 05s
+ *     big-pickle · shell sleep 8 · 9.1k
+ * The tool target is what gets shortened, never the status, time or tokens.
+ */
+export function agentLines(row: AgentRow, width: number): { head: string; glyph: string; rest: string; detail: string } {
+  const indent = "  ".repeat(Math.min(3, row.depth - 1))
+  const time = row.state === "idle" ? "queued" : formatDuration(row.elapsed)
+  const name = truncate(row.agent, Math.max(4, width - indent.length - 2 - time.length - 1))
+  const glyph = `${indent}${AGENT_GLYPH[row.state]}`
+  const pad = Math.max(1, width - glyph.length - 1 - name.length - time.length)
+  const rest = ` ${name}${" ".repeat(pad)}${time}`
+  const what =
+    row.state === "waiting" ? (row.waitingFor === "approval" ? "needs approval" : "needs input")
+    : row.state === "running" ? (row.tool ? callText(row.tool) : "thinking")
+    : row.state === "failed" ? "failed"
+    : row.state === "interrupted" ? "interrupted"
+    : ""
+  // the host adds a step's tokens to the session when the step ends, so 0 means "not yet"
+  const tail = [row.tokens > 0 ? formatTokens(row.tokens) : "", row.cost > 0 ? formatCost(row.cost) : ""].filter(Boolean).join(" · ")
+  const model = row.model ? `${truncate(row.model, 14)} · ` : ""
+  const fit = (lead: string) => (what ? width - lead.length - (tail ? tail.length + 3 : 0) : 0)
+  let lead = `${indent}  ${model}`
+  // a status word is the point of the row: drop the model before shortening it
+  if (row.state !== "running" && fit(lead) < what.length) lead = `${indent}  `
+  const room = fit(lead)
+  const parts = what && room >= 6 ? [truncate(what, room), tail] : [tail]
+  const detail = `${lead}${parts.filter(Boolean).join(" · ")}`.trimEnd().replace(/ ·$/, "")
+  return { head: glyph + rest, glyph, rest, detail }
 }

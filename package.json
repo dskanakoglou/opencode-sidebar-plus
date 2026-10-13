@@ -1,7 +1,7 @@
 {
   "name": "opencode-sidebar-plus",
-  "version": "0.1.0",
-  "description": "OpenCode v2 sidebar: context gauge, agent to-do list, live activity, shells, files, sub-agents and alerts, each switchable",
+  "version": "0.2.0",
+  "description": "OpenCode v2 sidebar: live sub-agent tree with approval-waiting, context gauge, to-do list, activity, shells, files and alerts, with presets",
   "type": "module",
   "license": "MIT",
   "author": "Dimitrios S. Kanakoglou",
@@ -22,6 +22,7 @@
     "tui.tsx",
     "src",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "scripts": {
