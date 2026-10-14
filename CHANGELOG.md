@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- README: a new introduction, a short install pinned to a release, and the
+  reference sections folded away; a new screenshot rendered from the real TUI.
+- `scripts/tuirun.py` gains hover, raw-key, colour, mark and snapshot steps;
+  `scripts/render.py` turns a snapshot into the screenshot.
+
 ## 0.3.0
 
 ### Added

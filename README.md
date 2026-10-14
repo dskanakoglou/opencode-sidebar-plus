@@ -1,89 +1,96 @@
 # opencode-sidebar-plus
 
-A sidebar for the [OpenCode](https://opencode.ai) **v2** terminal UI. It shows
-every sub-agent your agent has delegated to and which of them is waiting for
-you, how full the context window is, the agent's to-do list, and what it is doing
-right now, without scrolling the transcript.
+Do you want [OpenCode](https://opencode.ai) to tell you when a long command has
+finished, with a sound and, while you are in another window, a desktop
+notification? To see at a glance what every agent is working on, and which one is
+waiting for you? To run a command in the terminal without leaving OpenCode? Then
+this sidebar is for you.
 
-Three buttons sit at the foot of the sidebar: **▶ Run** runs a command, **≡ Details**
-opens a timeline and per-agent totals for the run, and **⚙ Options** (also
-`/sidebar`) chooses what appears.
+<img src="docs/sidebar-example.png" alt="OpenCode with Sidebar Plus during a four-agent run: two specialists are done, two wait for approval; alerts at the top, the agent tree, agent activity, and the Run, Details and Options buttons at the foot">
 
-<img src="docs/sidebar-example.png" width="364" alt="Sidebar Plus during a five-agent run: two sub-agents wait for the user, one is done, one failed">
+*Rendered from the real TUI (ayu-dark theme): a coordinator has started four
+specialists in parallel. Two are done; two wait for a shell approval, which
+OpenCode asks for under the conversation.*
 
-*A coordinator and four specialists, rendered from the real TUI (OpenCode's
-default theme). Two specialists wait for the user: one for a shell approval,
-one for an answer to a question.*
+## What you get
 
-[Install](#install) · [Agents](#agents) · [Other sections](#other-sections) · [Buttons](#buttons) · [Alerts](#alerts) · [Turning things on and off](#turning-things-on-and-off) · [Options](#options)
+- **Agents**: every sub-agent as a live tree, with what it is doing, its model,
+  time and tokens. One waiting for your approval or answer is flagged at once;
+  click it to open its conversation.
+- **Alerts in the sidebar**, not pop-ups over it: `✓ 5 agents finished`,
+  `◆ aligner needs approval`, `⚠ context 72% full`. A long command finishing also
+  plays a sound, and sends a desktop notification while you are in another window.
+- **▶ Run**: run a command in the chat (the agent sees the output) or in the
+  background, and run a finished one again with a click.
+- **≡ Details**: a timeline of when each agent worked, and its tokens, tool calls
+  and commands; optionally saved as a Markdown report.
+- **Context, to-do list and activity**: how full the context window is, the
+  agent's task list, and the tool it is running right now.
+- **⚙ Options** (or `/sidebar`): presets and every switch in one menu.
 
-## Compatibility
-
-OpenCode **2.0.16 or later** (written against the 2.0.28 plugin types, and
-type-checked against 2.0.16 too). It does not work on OpenCode 1.x, whose plugin
-format is different.
+Works with OpenCode **2.0.16 or later** (tested in the real TUI on 2.0.28); not with
+OpenCode 1.x, whose plugin format is different.
 
 ## Install
 
-The plugin has two halves: `tui.tsx`, the sidebar, and `server.ts`, which gives
-the agent a small `todo` tool (OpenCode v2 has no `todowrite`, so without it
-there is no task list to show). Nothing needs building; OpenCode compiles both
-files itself.
+Add the plugin to `opencode.json`, either your global
+`~/.config/opencode/opencode.json` or a project's, pinned to a release:
 
-**From GitHub:**
-
-```sh
-opencode plugin add github:dskanakoglou/opencode-sidebar-plus
+```json
+{ "plugins": ["github:dskanakoglou/opencode-sidebar-plus#v0.3.0"] }
 ```
 
-This installs the `main` branch into OpenCode's cache and adds the entry to
-`plugins` in your global `opencode.json`. `opencode plugin remove
-github:dskanakoglou/opencode-sidebar-plus` takes it out again.
+OpenCode downloads it on the next launch and keeps it cached. Without `#v0.3.0`
+you get whatever is on `main`. Then, in `~/.config/opencode/cli.json`, hide
+OpenCode's own context line, which this sidebar replaces, and turn on sounds and
+desktop notifications:
 
-**From a local folder**, listed in `opencode.json` (global
-`~/.config/opencode/opencode.json`, or the project's):
+```json
+{
+  "plugins": ["-opencode.sidebar.context"],
+  "attention": { "notifications": true, "sound": true, "volume": 0.4 }
+}
+```
+
+**No sidebar?** OpenCode shows it from 121 columns, and only once a conversation
+has started. On a narrower terminal press `ctrl+x b`; while it is hidden the
+prompt footer says `sidebar hidden · ctrl+x b`, and a sub-agent waiting for you is
+named just above the prompt.
+
+<details>
+<summary><b>Other ways to install</b></summary>
+
+`opencode plugin add github:dskanakoglou/opencode-sidebar-plus` installs `main` and
+adds the entry to your global `opencode.json`; `opencode plugin remove …` takes it
+out again.
+
+**From a local folder**, listed in `opencode.json`:
 
 ```json
 { "plugins": ["/absolute/path/to/opencode-sidebar-plus"] }
 ```
 
-A project can also point at a copy inside the repository; `./` paths are
-resolved against the project:
+A project can also point at a copy inside the repository (`"./vendor/sidebar-plus"`;
+`./` paths are resolved against the project), or keep one in
+`.opencode/plugins/sidebar-plus/` (copy `tui.tsx`, `server.ts`, `src/` and
+`package.json`), which OpenCode finds without a `plugins` entry. For a local folder
+OpenCode loads `<folder>/tui.tsx` and `<folder>/server.ts` directly, so keep both
+at the root.
 
-```json
-{ "plugins": ["./vendor/sidebar-plus"] }
-```
-
-**As a project plugin folder:** copy `tui.tsx`, `server.ts`, `src/` and
-`package.json` to `.opencode/plugins/sidebar-plus/` in the project. OpenCode
-finds folders there (and in `~/.config/opencode/plugins/`) without a `plugins`
-entry.
-
-For a local folder OpenCode loads `<folder>/tui.tsx` and `<folder>/server.ts`
-directly, so keep both at the root.
-
-**Hide the built-in context line**, which this plugin replaces, in
-`~/.config/opencode/cli.json`:
-
-```json
-{ "plugins": ["-opencode.sidebar.context"] }
-```
-
-**Sidebar only**, without the `todo` tool: leave `opencode.json` alone and list
-the folder in `cli.json` instead:
+The plugin has two halves: `tui.tsx`, the sidebar, and `server.ts`, which gives the
+agent a small `todo` tool (OpenCode v2 has no `todowrite`, so without it there is
+no task list to show). Nothing needs building; OpenCode compiles both itself.
+**Sidebar only**, without the `todo` tool: leave `opencode.json` alone and list the
+plugin in `cli.json` instead:
 
 ```json
 { "plugins": ["-opencode.sidebar.context", "/absolute/path/to/opencode-sidebar-plus"] }
 ```
 
-**Narrow terminals.** OpenCode shows the sidebar on its own from 121 columns. On
-a narrower terminal press `ctrl+x b` (or "Show sidebar" in the command palette)
-to bring it up; it keeps its fixed 42-column width. While the sidebar is hidden,
-the prompt footer says `sidebar hidden · ctrl+x b` (click it to bring the sidebar
-back), and a sub-agent waiting for you is named just above the prompt. OpenCode's
-start screen has no sidebar; a line there says it appears after the first message.
+</details>
 
-## Agents
+<details>
+<summary><b>The Agents section</b></summary>
 
 The Agents section is a live view of a multi-agent run: every sub-agent
 delegated from the conversation, and the sub-agents *they* delegated to, as an
@@ -132,7 +139,10 @@ Nested delegation (a sub-agent starting its own sub-agents) needs
 
 The plugin observes delegation; it does not create or coordinate agents.
 
-## Other sections
+</details>
+
+<details>
+<summary><b>Every section</b></summary>
 
 | Section | Contents |
 |---|---|
@@ -144,14 +154,18 @@ The plugin observes delegation; it does not create or coordinate agents.
 | **Details panel** | **≡ Details** opens a full-width panel: a timeline with one lane per agent on a shared time axis, a per-agent table (model, state, time, tokens, cost, tools, failures, commands, with totals), context growth, a per-turn table and the last 40 tool calls. `esc` closes it. |
 
 Sections with nothing to show are hidden. Terminal commands, off in the Minimal
-and Agents presets, also shows once you start a background command with **▶ Run**. Click a heading (`▼` / `▶`) to
-collapse or expand it; this is remembered. Colours come from your theme.
+and Agents presets, also shows once you start a background command with **▶ Run**.
+Click a heading (`▼` / `▶`) to collapse or expand it; this is remembered. Colours
+come from your theme.
 
 Task lists are what the agent reports, not proof of completion. Loop and
 truncation warnings are heuristics. Files lists recorded tool operations, not
 every file a shell command touched.
 
-## Buttons
+</details>
+
+<details>
+<summary><b>Buttons, Run, pointer and reports</b></summary>
 
 The foot of the sidebar holds three buttons, in every preset:
 
@@ -178,7 +192,10 @@ Markdown summary of the run (timeline, per-agent table, every command with the
 agent that ran it, files changed) to `reports/<title>-<date>-<time>.md` in the
 session folder, or a path you type.
 
-## Alerts
+</details>
+
+<details>
+<summary><b>Alerts</b></summary>
 
 OpenCode already notifies when a session finishes or fails, plays its own
 sounds for sub-agents, and toasts a failed sub-agent. The plugin adds alerts for
@@ -210,7 +227,10 @@ does not change OpenCode's sounds. Notifications need attention enabled in
 "attention": { "notifications": true, "sound": true, "volume": 0.4 }
 ```
 
-## Turning things on and off
+</details>
+
+<details>
+<summary><b>Turning things on and off</b></summary>
 
 Click **⚙ Options** (or run `/sidebar`, or "Sidebar options" in the command
 palette) and pick a preset. The change applies at once and is remembered.
@@ -237,7 +257,10 @@ the table below; Enter flips one and the menu stays open on it. Type to filter.
 | Agents | `subagents.top` (Agents first while there are sub-agents), `subagents.banner` (the waiting banner) |
 | Alerts | `alerts.context`, `alerts.loop`, `alerts.truncation`, `alerts.commands`, `alerts.agents` |
 
-## Options
+</details>
+
+<details>
+<summary><b>Options</b></summary>
 
 Sidebar options go on an object entry in `cli.json` (this works alongside an
 `opencode.json` entry; the sidebar still loads once):
@@ -260,19 +283,22 @@ Sidebar options go on an object entry in `cli.json` (this works alongside an
 | `features` | per preset | On/off for any switch above, on top of the preset |
 | `sections` | all | Section order. Sections left out start switched off |
 | `agentsShown` | `8` | Finished sub-agents listed before `+N more finished` |
-| `warnAt` | `70` | Context % for the warning colour and toast |
-| `dangerAt` | `90` | Context % for the error colour and toast |
+| `warnAt` | `70` | Context % for the warning colour and alert |
+| `dangerAt` | `90` | Context % for the error colour and alert |
 | `compactionBuffer` | unset | Your `compaction.buffer` (for example `2048`), to show "compacts at …" |
 | `recentTools` | `5` | Tool calls listed under Agent activity |
 | `loopThreshold` | `3` | Same-tool, same-target calls in a row before the loop warning (minimum 2) |
 | `shellNotifyAfter` | `20` | Seconds a command must run before its completion is announced |
-| `toasts` | `true` | `false` turns off the context, loop and truncation toasts |
+| `toasts` | `true` | `false` turns off the context, loop and truncation alerts (the name is kept from v0.1) |
 | `report` | `false` | `true` allows saving run reports until switched under ⚙ Options |
 
 Server option, on the `opencode.json` entry: `{ "todo": false }` leaves out the
 `todo` tool.
 
-## Things to know
+</details>
+
+<details>
+<summary><b>Things to know</b></summary>
 
 - The `todo` tool's description and schema add about 170 tokens to every
   request; `{ "todo": false }` removes them. The agent sends its whole list on
@@ -290,7 +316,10 @@ Server option, on the `opencode.json` entry: `{ "todo": false }` leaves out the
 - OpenCode does not show the sidebar while you look at a sub-agent's
   conversation; `esc` returns to the main one.
 
-## Development
+</details>
+
+<details>
+<summary><b>Development</b></summary>
 
 ```sh
 npm install   # types only; OpenCode provides solid-js and @opentui at runtime
@@ -299,16 +328,19 @@ npm test      # node --test on the pure logic in src/derive.ts
 ```
 
 - `src/derive.ts` holds the logic as pure functions (the agent tree, header
-  summary, waiting banner, presets) with tests in `test/`.
+  summary, waiting banner, presets, timeline, per-agent table, alerts and the run
+  report) with tests in `test/`.
 - `src/widgets.tsx` holds the views and a per-session memo shared by every
-  section, `tui.tsx` the wiring and toasts, `server.ts` the `todo` tool.
+  section; `tui.tsx` the wiring, the Options menu, Run, alerts and the pointer;
+  `server.ts` the `todo` tool.
 - `scripts/tuirun.py` drives the real TUI in a pseudo-terminal and prints the
-  rendered screen as text (needs `pip install pyte`). Setting
-  `OPENCODE_CLI_CONFIG_CONTENT` tests a config without touching your `cli.json`;
-  setting `XDG_STATE_HOME` to a scratch folder keeps test prompts out of your
-  prompt history and test clicks out of your sidebar settings.
+  rendered screen as text (needs `pip install pyte`); its docstring lists the
+  steps. `scripts/render.py` turns one of its snapshots into the screenshot above.
 
-## Acknowledgements
+</details>
+
+<details>
+<summary><b>Acknowledgements</b></summary>
 
 This plugin was built on, or learned from, the following projects. None of their code is copied here, except that the plugin uses the OpenCode, OpenTUI and SolidJS packages at runtime, as every OpenCode TUI plugin does.
 
@@ -340,3 +372,5 @@ This plugin was built on, or learned from, the following projects. None of their
 - **[TypeScript](https://github.com/microsoft/TypeScript)** (Apache-2.0) and the Node.js test runner.
 - **[Ollama](https://github.com/ollama/ollama)** with Qwen3 8B, for local test runs. Those runs revealed the `num_ctx` truncation that the Context section now detects.
 - OpenCode's free `opencode/big-pickle` model, for test runs without a context cap.
+
+</details>

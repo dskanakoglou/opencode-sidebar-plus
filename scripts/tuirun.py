@@ -7,8 +7,20 @@ script: {"cmd": ["opencode", "--standalone", DIR], "cwd": DIR, "env": {...}, "co
          "raw": "optional/path/to/raw-output.log",
          "steps": [["wait", 8], ["keys", "hello\r"], ["until", "TEXT", 60], ["click", "TEXT"], ["dump", "label"]]}
 
-Tip: set env OPENCODE_CLI_CONFIG_CONTENT to a cli.json string to test a config
-without touching ~/.config/opencode/cli.json.
+steps:
+  wait SECONDS          let the TUI run
+  keys TEXT             type TEXT one character at a time
+  rawkeys TEXT          send TEXT in one write (escape sequences such as arrow keys)
+  until TEXT SECONDS    wait until TEXT is on screen
+  click TEXT / hover TEXT   mouse press+release / motion on the first cell of TEXT
+  color [TEXT, ...]     print the foreground colour of each TEXT's first cell
+  mark LABEL            write @@MARK LABEL@@ into the raw log (to find escape codes, e.g. OSC 22)
+  dump LABEL            print the screen as text
+  snapshot FILE         save every cell (character, colours, bold) as JSON for scripts/render.py
+
+Tips: env OPENCODE_CLI_CONFIG_CONTENT tests a cli.json without touching yours;
+XDG_STATE_HOME pointed at a scratch folder keeps test prompts and plugin settings
+out of your own; HOME pointed at one also keeps sessions out and shortens paths to ~.
 """
 import json, os, pty, select, sys, time, signal
 import pyte
@@ -70,6 +82,24 @@ for step in spec["steps"]:
             y, x = hit
             os.write(fd, f"\x1b[<0;{x+1};{y+1}M".encode()); pump(0.05)
             os.write(fd, f"\x1b[<0;{x+1};{y+1}m".encode()); pump(0.5)
+    elif kind == "hover":
+        hit = next(((y, line.find(step[1])) for y, line in enumerate(screen.display) if step[1] in line), None)
+        print(f"--- hover {step[1]!r}: {hit}")
+        if hit:
+            y, x = hit
+            os.write(fd, f"\x1b[<35;{x+1};{y+1}M".encode()); pump(0.5)
+    elif kind == "rawkeys":
+        os.write(fd, step[1].encode()); pump(0.3)
+    elif kind == "color":
+        for label in step[1]:
+            hit = next(((y, line.find(label)) for y, line in enumerate(screen.display) if label in line), None)
+            print(f"--- color {label!r}: {screen.buffer[hit[0]][hit[1]].fg if hit else None}")
+    elif kind == "snapshot":
+        cells = [[(c.data, c.fg, c.bg, c.bold, c.reverse) for c in (screen.buffer[y][x] for x in range(cols))] for y in range(rows)]
+        json.dump(cells, open(step[1], "w"))
+        print(f"--- snapshot {step[1]}")
+    elif kind == "mark":
+        raw.write(f"\n@@MARK {step[1]}@@\n".encode()); raw.flush()
     elif kind == "dump":
         print(f"===== {step[1]} =====")
         print(text())
