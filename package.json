@@ -1,6 +1,6 @@
 {
   "name": "opencode-sidebar-plus",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "OpenCode v2 sidebar: live sub-agent tree with approval-waiting, alerts in the sidebar, run a command, a run timeline, context gauge, to-do list and presets",
   "type": "module",
   "license": "MIT",

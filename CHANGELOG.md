@@ -1,9 +1,15 @@
 # Changelog
 
-## Unreleased
+## 0.3.1
 
-- README: a new introduction, a short install pinned to a release, and the
-  reference sections folded away; a new screenshot rendered from the real TUI.
+- **Fixed:** the prompt footer no longer says `sidebar hidden · ctrl+x b` while
+  another plugin's panel (for example
+  [opencode-notebook](https://github.com/dskanakoglou/opencode-notebook)) holds
+  the sidebar's place.
+- README: install by cloning a release into `.opencode/plugins/`. On OpenCode
+  2.0.29 a `github:` plugin entry loads the sidebar but it never updates.
+- README: a new introduction and the reference sections folded away; a new
+  screenshot rendered from the real TUI.
 - `scripts/tuirun.py` gains hover, raw-key, colour, mark and snapshot steps;
   `scripts/render.py` turns a snapshot into the screenshot.
 

@@ -132,6 +132,14 @@ const plugin: Plugin.Definition = {
     const [userShells, setUserShells] = createSignal(false)
     // How many sidebars are on screen: OpenCode unmounts the sidebar slots when it hides them.
     const [sidebars, setSidebars] = createSignal(0)
+    // How many panels are open, ours or another plugin's: a panel takes the sidebar's place,
+    // so "sidebar hidden" would be wrong while one is open.
+    const [panels, setPanels] = createSignal(0)
+    const PanelSeen = () => {
+      setPanels((n) => n + 1)
+      onCleanup(() => setPanels((n) => n - 1))
+      return null
+    }
     const currentSession = () => {
       const route = ctx.ui.router.current()
       return route.type === "session" ? route.sessionID : undefined
@@ -378,7 +386,7 @@ const plugin: Plugin.Definition = {
       ctx.ui.slot({
         append: "prompt.footer.status",
         render: (input) => (
-          <Show when={input.sessionID && sidebars() === 0 && !ctx.ui.panel.current() && on("hints")}>
+          <Show when={input.sessionID && sidebars() === 0 && panels() === 0 && on("hints")}>
             <HiddenHint shared={shared} />
           </Show>
         ),
@@ -402,9 +410,12 @@ const plugin: Plugin.Definition = {
       ctx.ui.slot({
         append: "session.panel",
         render: (input) => (
-          <Show when={input.name === PANEL}>
-            <DetailsPanel shared={shared} input={input} />
-          </Show>
+          <>
+            <PanelSeen />
+            <Show when={input.name === PANEL}>
+              <DetailsPanel shared={shared} input={input} />
+            </Show>
+          </>
         ),
       }),
       ctx.ui.slot({

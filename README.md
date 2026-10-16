@@ -28,20 +28,32 @@ OpenCode asks for under the conversation.*
   agent's task list, and the tool it is running right now.
 - **⚙ Options** (or `/sidebar`): presets and every switch in one menu.
 
-Works with OpenCode **2.0.16 or later** (tested in the real TUI on 2.0.28); not with
+Works with OpenCode **2.0.16 or later** (tested in the real TUI on 2.0.29); not with
 OpenCode 1.x, whose plugin format is different.
 
 ## Install
 
-Add the plugin to `opencode.json`, either your global
-`~/.config/opencode/opencode.json` or a project's, pinned to a release:
+Clone a release into a project's `.opencode/plugins/` folder; OpenCode loads
+plugins from there by itself:
 
-```json
-{ "plugins": ["github:dskanakoglou/opencode-sidebar-plus#v0.3.0"] }
+```bash
+git clone -q --depth 1 --branch v0.3.1 https://github.com/dskanakoglou/opencode-sidebar-plus .opencode/plugins/sidebar-plus
 ```
 
-OpenCode downloads it on the next launch and keeps it cached. Without `#v0.3.0`
-you get whatever is on `main`. Then, in `~/.config/opencode/cli.json`, hide
+Git notes that the tag "is not a commit" and that you are on a "detached
+HEAD"; both are expected when cloning a release. For every project, clone it
+anywhere and list the folder in your global `~/.config/opencode/opencode.json`:
+
+```json
+{ "plugins": ["/absolute/path/to/opencode-sidebar-plus"] }
+```
+
+**Not with a `github:` entry for now.** On OpenCode 2.0.29 a plugin installed
+as `"github:dskanakoglou/opencode-sidebar-plus#v0.3.1"` (or with `opencode plugin
+add github:…`) loads, but the sidebar is drawn once and never updates. Loaded
+from a folder it works.
+
+Restart OpenCode after installing. Then, in `~/.config/opencode/cli.json`, hide
 OpenCode's own context line, which this sidebar replaces, and turn on sounds and
 desktop notifications:
 
@@ -60,20 +72,11 @@ named just above the prompt.
 <details>
 <summary><b>Other ways to install</b></summary>
 
-`opencode plugin add github:dskanakoglou/opencode-sidebar-plus` installs `main` and
-adds the entry to your global `opencode.json`; `opencode plugin remove …` takes it
-out again.
-
-**From a local folder**, listed in `opencode.json`:
-
-```json
-{ "plugins": ["/absolute/path/to/opencode-sidebar-plus"] }
-```
-
 A project can also point at a copy inside the repository (`"./vendor/sidebar-plus"`;
 `./` paths are resolved against the project), or keep one in
-`.opencode/plugins/sidebar-plus/` (copy `tui.tsx`, `server.ts`, `src/` and
-`package.json`), which OpenCode finds without a `plugins` entry. For a local folder
+`.opencode/plugins/sidebar-plus/` (a clone, as above, or a copy of `tui.tsx`,
+`server.ts`, `src/` and `package.json`), which OpenCode finds without a `plugins`
+entry. For a local folder
 OpenCode loads `<folder>/tui.tsx` and `<folder>/server.ts` directly, so keep both
 at the root.
 
