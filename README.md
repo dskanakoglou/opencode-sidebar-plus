@@ -37,12 +37,11 @@ Clone a release into a project's `.opencode/plugins/` folder; OpenCode loads
 plugins from there by itself:
 
 ```bash
-git clone -q --depth 1 --branch v0.3.1 https://github.com/dskanakoglou/opencode-sidebar-plus .opencode/plugins/sidebar-plus
+git -c advice.detachedHead=false clone -q --depth 1 --branch v0.3.1 https://github.com/dskanakoglou/opencode-sidebar-plus .opencode/plugins/sidebar-plus
 ```
 
-Git notes that the tag "is not a commit" and that you are on a "detached
-HEAD"; both are expected when cloning a release. For every project, clone it
-anywhere and list the folder in your global `~/.config/opencode/opencode.json`:
+For every project, clone it anywhere and list the folder in your global
+`~/.config/opencode/opencode.json`:
 
 ```json
 { "plugins": ["/absolute/path/to/opencode-sidebar-plus"] }
