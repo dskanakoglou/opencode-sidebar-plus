@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.2
+
+- The ▶ Run · ≡ Details · ⚙ Options buttons at the foot of the sidebar sit on a
+  band one step above the sidebar background, in the accent colour.
+
 ## 0.3.1
 
 - **Fixed:** the prompt footer no longer says `sidebar hidden · ctrl+x b` while

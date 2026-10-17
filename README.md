@@ -37,7 +37,7 @@ Clone a release into a project's `.opencode/plugins/` folder; OpenCode loads
 plugins from there by itself:
 
 ```bash
-git -c advice.detachedHead=false clone -q --depth 1 --branch v0.3.1 https://github.com/dskanakoglou/opencode-sidebar-plus .opencode/plugins/sidebar-plus
+git -c advice.detachedHead=false clone -q --depth 1 --branch v0.3.2 https://github.com/dskanakoglou/opencode-sidebar-plus .opencode/plugins/sidebar-plus
 ```
 
 For every project, clone it anywhere and list the folder in your global
@@ -48,7 +48,7 @@ For every project, clone it anywhere and list the folder in your global
 ```
 
 **Not with a `github:` entry for now.** On OpenCode 2.0.29 a plugin installed
-as `"github:dskanakoglou/opencode-sidebar-plus#v0.3.1"` (or with `opencode plugin
+as `"github:dskanakoglou/opencode-sidebar-plus#v0.3.2"` (or with `opencode plugin
 add github:…`) loads, but the sidebar is drawn once and never updates. Loaded
 from a folder it works.
 

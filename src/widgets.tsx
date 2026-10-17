@@ -183,12 +183,15 @@ export function Clickable(props: { shared: Shared; onClick?: () => void; onHover
 }
 
 /** A text button: accent label, highlighted while hovered. */
-export function Button(props: { shared: Shared; label: string; onClick: () => void; muted?: boolean }) {
+export function Button(props: { shared: Shared; label: string; onClick: () => void; muted?: boolean; accent?: boolean }) {
   const theme = props.shared.ctx.theme
   const [hovered, setHovered] = createSignal(false)
   return (
     <Clickable shared={props.shared} onClick={props.onClick} onHover={setHovered}>
-      <text fg={hovered() ? accent(props.shared.ctx) : props.muted ? theme.text.muted : theme.text.base} bg={hovered() ? theme.background.raised.high : undefined}>
+      <text
+        fg={hovered() || props.accent ? accent(props.shared.ctx) : props.muted ? theme.text.muted : theme.text.base}
+        bg={hovered() ? theme.background.raised.high : undefined}
+      >
         {props.label}
       </text>
     </Clickable>
@@ -637,11 +640,12 @@ export function AlertsStrip(props: { shared: Shared }) {
 /** The button row at the foot of the sidebar, in every preset. */
 export function SidebarFooter(props: { shared: Shared; sessionID: string }) {
   const { actions } = props.shared
+  // on a band one step above the sidebar background, so the buttons read as controls
   return (
-    <box flexDirection="row" gap={2}>
-      <Button shared={props.shared} label="▶ Run" onClick={() => actions.run(props.sessionID)} />
-      <Button shared={props.shared} label="≡ Details" onClick={actions.details} />
-      <Button shared={props.shared} label="⚙ Options" onClick={actions.options} />
+    <box flexDirection="row" gap={2} paddingLeft={1} paddingRight={1} backgroundColor={props.shared.ctx.theme.background.raised.high}>
+      <Button shared={props.shared} accent label="▶ Run" onClick={() => actions.run(props.sessionID)} />
+      <Button shared={props.shared} accent label="≡ Details" onClick={actions.details} />
+      <Button shared={props.shared} accent label="⚙ Options" onClick={actions.options} />
     </box>
   )
 }
