@@ -1,5 +1,13 @@
 # opencode-sidebar-plus
 
+<!-- badges: start -->
+[![Tests on Linux](https://img.shields.io/github/check-runs/dskanakoglou/opencode-sidebar-plus/main?nameFilter=tests%20%28ubuntu-latest%29&label=tests%20Linux)](https://github.com/dskanakoglou/opencode-sidebar-plus/actions/workflows/tests.yml)
+[![Tests on Windows](https://img.shields.io/github/check-runs/dskanakoglou/opencode-sidebar-plus/main?nameFilter=tests%20%28windows-latest%29&label=tests%20Windows)](https://github.com/dskanakoglou/opencode-sidebar-plus/actions/workflows/tests.yml)
+[![Tests on macOS](https://img.shields.io/github/check-runs/dskanakoglou/opencode-sidebar-plus/main?nameFilter=tests%20%28macos-latest%29&label=tests%20macOS)](https://github.com/dskanakoglou/opencode-sidebar-plus/actions/workflows/tests.yml)
+[![Release](https://img.shields.io/github/v/release/dskanakoglou/opencode-sidebar-plus)](https://github.com/dskanakoglou/opencode-sidebar-plus/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+<!-- badges: end -->
+
 Do you want [OpenCode](https://opencode.ai) to tell you when a long command has
 finished, with a sound and, while you are in another window, a desktop
 notification? To see at a glance what every agent is working on, and which one is
